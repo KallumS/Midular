@@ -221,7 +221,7 @@ end
 
 local function parse_smf(data)
   local r = reader(data)
-  if r:str(4) ~= "MThd" then return nil, "not a Standard MIDI File (no MThd chunk)" end
+  if r:str(4) ~= "MThd" then return nil, "It isn’t a Standard MIDI File." end
   local hlen   = r:u32()
   local _      = r:u16()          -- format
   local ntrks  = r:u16()
@@ -357,34 +357,34 @@ local function main()
   if #items > 0 then
     ph = phrase_from_items(items)
   else
-    local ok, path = reaper.GetUserFileNameForRead("", "Midular: choose a MIDI file", ".mid")
+    local ok, path = reaper.GetUserFileNameForRead("", "Choose a MIDI File to Import into Midular", ".mid")
     if not ok then return end
     local f = io.open(path, "rb")
-    if not f then msg("Could not open:\n" .. path) return end
+    if not f then msg("“" .. path .. "” couldn’t be opened.\n\nCheck that the file is still there, then try again.") return end
     local data = f:read("*a")
     f:close()
     local err
     ph, err = parse_smf(data)
-    if not ph then msg("Could not read that file:\n" .. tostring(err)) return end
+    if not ph then msg("“" .. path .. "” couldn’t be read. " .. tostring(err) .. "\n\nChoose a .mid file saved from REAPER or another MIDI program.") return end
     ph.name = path:match("([^/\\]+)%.[Mm][Ii][Dd][Ii]?$") or path:match("([^/\\]+)$") or "phrase"
   end
 
-  if #ph.notes == 0 then msg("No notes were found - nothing to import.") return end
+  if #ph.notes == 0 then msg("There are no notes to import.\n\nSelect a MIDI item with notes in it, or select nothing to choose a MIDI file.") return end
 
-  local ok, name = reaper.GetUserInputs("Midular Import", 1, "Save as (in Data/midular),extrawidth=140", ph.name)
+  local ok, name = reaper.GetUserInputs("Midular Import", 1, "Name (saved in Data/midular),extrawidth=140", ph.name)
   if not ok then return end
 
   local file = sanitize(name)
   local path = out_dir() .. "/" .. file
   local wrote, werr = write_phrase(ph, path)
-  if not wrote then msg("Could not write:\n" .. path .. "\n\n" .. tostring(werr)) return end
+  if not wrote then msg("“" .. path .. "” couldn’t be saved.\n\n" .. tostring(werr) .. "\n\nCheck that REAPER’s Data folder can be written to, then try again.") return end
 
   msg(string.format(
-    "Imported %d notes (%.2f beats, %d markers) at %.1f BPM %d/%d.\n\n%s\n\n" ..
-    "Pick it from Midular's Source File selector.",
+    "Imported %d notes (%.2f beats, %d markers) at %.1f BPM in %d/%d.\n\n%s\n\n" ..
+    "To use it, click the file name at the top of Midular’s window and choose it.",
     #ph.notes, ph.length, #ph.markers, ph.tempo, ph.tsnum, ph.tsden, path))
 end
 
 reaper.Undo_BeginBlock()
 main()
-reaper.Undo_EndBlock("Midular: import MIDI source", -1)
+reaper.Undo_EndBlock("Import MIDI Source into Midular", -1)

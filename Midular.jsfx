@@ -28,7 +28,7 @@ slider1:/midular:default.txt:Source File
 slider2:0<0,3,1{Classic,One-Shot,Slice,Granular}>-Mode
 slider3:60<0,127,1>-Root Key
 slider4:0<-48,48,1>-Transpose
-slider5:1<0,2,1{Off,Transpose,Rate (pitch)}>-Key Tracking
+slider5:1<0,2,1{Off,Transpose,Rate (Pitch)}>-Key Tracking
 slider6:8<1,16,1>-Polyphony
 slider7:2<0,2,1{Source,Played Key,Blend}>-Velocity Source
 slider8:100<0,200,1>-Velocity Scale
@@ -39,7 +39,7 @@ slider12:0<0,48,1>-Humanize Velocity
 slider13:0<0,1,1{Off,On}>-MIDI Thru
 
 // --- warp -------------------------------------------------------------------
-slider14:1<0,2,1{Free (source tempo),Sync (project),Fixed Length}>-Warp Mode
+slider14:1<0,2,1{Free (Source Tempo),Sync (Project),Fixed Length}>-Warp Mode
 slider15:1<0.0625,8,0.0001>-Speed
 slider16:4<0.25,64,0.25>-Fixed Length
 slider17:0<0,1,1{Retrigger,Transport Lock}>-Start Mode
@@ -60,8 +60,8 @@ slider27:0<0,5000,1>-Attack
 slider28:500<0,10000,1>-Decay
 slider29:100<0,100,0.1>-Sustain
 slider30:80<0,10000,1>-Release
-slider31:100<0,100,0.1>-Env Amount
-slider32:0<-1,1,0.01>-Env Curve
+slider31:100<0,100,0.1>-Envelope Amount
+slider32:0<-1,1,0.01>-Envelope Curve
 
 // --- note filter ------------------------------------------------------------
 slider33:0<0,4,1{Off,Lowpass,Highpass,Bandpass,Notch}>-Filter Mode
@@ -69,7 +69,7 @@ slider34:64<0,127,0.1>-Filter Cutoff
 slider35:24<0.5,60,0.1>-Filter Width
 slider36:12<0,48,0.1>-Filter Slope
 slider37:0<0,100,0.1>-Filter Resonance
-slider38:0<-100,100,1>-Filter Key Track
+slider38:0<-100,100,1>-Filter Key Tracking
 slider39:5<0,100,1>-Filter Threshold
 
 // --- slice ------------------------------------------------------------------
@@ -204,73 +204,73 @@ function md_build_ui()
   md_nctl = 0;
 
   // ---- page 1: PLAY --------------------------------------------------------
-  md_ctl_cell(CT_SELECT,  2, 0,   0, 3,   1, 0, 0, 1, "MODE",        "Classic|One-Shot|Slice|Granular");
-  md_ctl_cell(CT_KNOB,    3, 60,  0, 127, 1, 1, 0, 1, "ROOT KEY",    "note %d");
-  md_ctl_cell(CT_KNOB,    4, 0, -48, 48,  1, 2, 0, 1, "TRANSPOSE",   "%+d st");
-  md_ctl_cell(CT_SELECT,  5, 1,   0, 2,   1, 3, 0, 1, "KEY TRACK",   "Off|Transpose|Rate");
-  md_ctl_cell(CT_KNOB,    6, 8,   1, 16,  1, 4, 0, 1, "POLYPHONY",   "%d");
-  md_ctl_cell(CT_SELECT,  7, 2,   0, 2,   1, 5, 0, 1, "VELOCITY",    "Source|Played Key|Blend");
-  md_ctl_cell(CT_KNOB,    8, 100, 0, 200, 1, 6, 0, 1, "VEL SCALE",   "%d %%");
+  md_ctl_cell(CT_SELECT,  2, 0,   0, 3,   1, 0, 0, 1, "Mode",        "Classic|One-Shot|Slice|Granular");
+  md_ctl_cell(CT_KNOB,    3, 60,  0, 127, 1, 1, 0, 1, "Root Key",    "note %d");
+  md_ctl_cell(CT_KNOB,    4, 0, -48, 48,  1, 2, 0, 1, "Transpose",   "%+d semitones");
+  md_ctl_cell(CT_SELECT,  5, 1,   0, 2,   1, 3, 0, 1, "Key Tracking", "Off|Transpose|Rate");
+  md_ctl_cell(CT_KNOB,    6, 8,   1, 16,  1, 4, 0, 1, "Polyphony",   "%d");
+  md_ctl_cell(CT_SELECT,  7, 2,   0, 2,   1, 5, 0, 1, "Velocity",    "Source|Played Key|Blend");
+  md_ctl_cell(CT_KNOB,    8, 100, 0, 200, 1, 6, 0, 1, "Velocity Scale",   "%d %%");
 
-  md_ctl_cell(CT_KNOB,    9, 100, 1, 400, 1, 0, 1, 1, "NOTE LENGTH", "%d %%");
-  md_ctl_cell(CT_KNOB,   10, 0,   0, 16,  1, 1, 1, 1, "OUT CHANNEL", "%d");
-  md_ctl_cell(CT_KNOB,   11, 0,   0, 60, 0.1,2, 1, 1, "HUMAN TIME",  "%.1f ms");
-  md_ctl_cell(CT_KNOB,   12, 0,   0, 48,  1, 3, 1, 1, "HUMAN VEL",   "%d");
-  md_ctl_cell(CT_TOGGLE, 13, 0,   0, 1,   1, 4, 1, 1, "MIDI THRU",   "Off|On");
-  md_ctl_cell(CT_SELECT, 55, 0,   0, 2,   1, 5, 1, 1, "RETRIGGER",   "Restart|Ignore|Legato");
-  md_ctl_cell(CT_TOGGLE, 56, 0,   0, 1,   1, 6, 1, 1, "MONO CHOKE",  "Off|On");
+  md_ctl_cell(CT_KNOB,    9, 100, 1, 400, 1, 0, 1, 1, "Note Length", "%d %%");
+  md_ctl_cell(CT_KNOB,   10, 0,   0, 16,  1, 1, 1, 1, "Output Channel", "%d");
+  md_ctl_cell(CT_KNOB,   11, 0,   0, 60, 0.1,2, 1, 1, "Humanize Timing",  "%.1f ms");
+  md_ctl_cell(CT_KNOB,   12, 0,   0, 48,  1, 3, 1, 1, "Humanize Velocity",   "%d");
+  md_ctl_cell(CT_TOGGLE, 13, 0,   0, 1,   1, 4, 1, 1, "MIDI Thru",   "Off|On");
+  md_ctl_cell(CT_SELECT, 55, 0,   0, 2,   1, 5, 1, 1, "Retrigger",   "Restart|Ignore|Legato");
+  md_ctl_cell(CT_TOGGLE, 56, 0,   0, 1,   1, 6, 1, 1, "Mono Choke",  "Off|On");
 
   // ---- page 2: WARP + LOOP -------------------------------------------------
-  md_ctl_cell(CT_SELECT, 14, 1,   0, 2,   1, 0, 0, 2, "WARP",        "Free|Sync|Fixed Length");
-  md_ctl_cell(CT_KNOB,   15, 1, 0.0625, 8, 0.0001, 1, 0, 2, "SPEED", "x%.3f");
-  md_ctl_cell(CT_KNOB,   16, 4, 0.25, 64, 0.25, 2, 0, 2, "FIXED LEN", "%.2f bt");
-  md_ctl_cell(CT_SELECT, 17, 0,   0, 1,   1, 3, 0, 2, "START",       "Retrigger|Transport Lock");
-  md_ctl_cell(CT_SELECT, 18, 0,   0, 5,   1, 4, 0, 2, "TRIG QUANT",  "Off|1/16|1/8|1/4|1/2|1 Bar");
-  md_ctl_cell(CT_KNOB,   19, 0,   0, 99, 0.01, 5, 0, 2, "REGION ST", "%.2f %%");
-  md_ctl_cell(CT_KNOB,   20, 100, 1, 100, 0.01, 6, 0, 2, "REGION LEN", "%.2f %%");
+  md_ctl_cell(CT_SELECT, 14, 1,   0, 2,   1, 0, 0, 2, "Warp Mode",        "Free|Sync|Fixed Length");
+  md_ctl_cell(CT_KNOB,   15, 1, 0.0625, 8, 0.0001, 1, 0, 2, "Speed", "×%.3f");
+  md_ctl_cell(CT_KNOB,   16, 4, 0.25, 64, 0.25, 2, 0, 2, "Fixed Length", "%.2f beats");
+  md_ctl_cell(CT_SELECT, 17, 0,   0, 1,   1, 3, 0, 2, "Start Mode",       "Retrigger|Transport Lock");
+  md_ctl_cell(CT_SELECT, 18, 0,   0, 5,   1, 4, 0, 2, "Trigger Quantize",  "Off|1/16|1/8|1/4|1/2|1 Bar");
+  md_ctl_cell(CT_KNOB,   19, 0,   0, 99, 0.01, 5, 0, 2, "Region Start", "%.2f %%");
+  md_ctl_cell(CT_KNOB,   20, 100, 1, 100, 0.01, 6, 0, 2, "Region Length", "%.2f %%");
 
-  md_ctl_cell(CT_TOGGLE, 21, 0,   0, 1,   1, 0, 1, 2, "REVERSE",     "Off|On");
-  md_ctl_cell(CT_TOGGLE, 22, 1,   0, 1,   1, 1, 1, 2, "LOOP",        "Off|On");
-  md_ctl_cell(CT_SELECT, 23, 0,   0, 2,   1, 2, 1, 2, "LOOP MODE",   "Forward|Reverse|Ping-Pong");
-  md_ctl_cell(CT_KNOB,   24, 0,   0, 99, 0.01, 3, 1, 2, "LOOP START", "%.2f %%");
-  md_ctl_cell(CT_KNOB,   25, 100, 1, 100, 0.01, 4, 1, 2, "LOOP LEN", "%.2f %%");
-  md_ctl_cell(CT_KNOB,   26, 0,   0, 64,  1, 5, 1, 2, "LOOP COUNT",  "%d");
+  md_ctl_cell(CT_TOGGLE, 21, 0,   0, 1,   1, 0, 1, 2, "Reverse",     "Off|On");
+  md_ctl_cell(CT_TOGGLE, 22, 1,   0, 1,   1, 1, 1, 2, "Loop",        "Off|On");
+  md_ctl_cell(CT_SELECT, 23, 0,   0, 2,   1, 2, 1, 2, "Loop Mode",   "Forward|Reverse|Ping-Pong");
+  md_ctl_cell(CT_KNOB,   24, 0,   0, 99, 0.01, 3, 1, 2, "Loop Start", "%.2f %%");
+  md_ctl_cell(CT_KNOB,   25, 100, 1, 100, 0.01, 4, 1, 2, "Loop Length", "%.2f %%");
+  md_ctl_cell(CT_KNOB,   26, 0,   0, 64,  1, 5, 1, 2, "Loop Count",  "%d");
 
   // ---- page 3: AMP + FILTER ------------------------------------------------
-  md_ctl_cell(CT_KNOB,   27, 0,   0, 5000, 1, 0, 0, 3, "ATTACK",     "%d ms");
-  md_ctl_cell(CT_KNOB,   28, 500, 0, 10000, 1, 1, 0, 3, "DECAY",     "%d ms");
-  md_ctl_cell(CT_KNOB,   29, 100, 0, 100, 0.1, 2, 0, 3, "SUSTAIN",   "%.1f %%");
-  md_ctl_cell(CT_KNOB,   30, 80,  0, 10000, 1, 3, 0, 3, "RELEASE",   "%d ms");
-  md_ctl_cell(CT_KNOB,   31, 100, 0, 100, 0.1, 4, 0, 3, "ENV AMOUNT","%.1f %%");
-  md_ctl_cell(CT_KNOB,   32, 0,  -1, 1, 0.01, 5, 0, 3, "ENV CURVE",  "%+.2f");
+  md_ctl_cell(CT_KNOB,   27, 0,   0, 5000, 1, 0, 0, 3, "Attack",     "%d ms");
+  md_ctl_cell(CT_KNOB,   28, 500, 0, 10000, 1, 1, 0, 3, "Decay",     "%d ms");
+  md_ctl_cell(CT_KNOB,   29, 100, 0, 100, 0.1, 2, 0, 3, "Sustain",   "%.1f %%");
+  md_ctl_cell(CT_KNOB,   30, 80,  0, 10000, 1, 3, 0, 3, "Release",   "%d ms");
+  md_ctl_cell(CT_KNOB,   31, 100, 0, 100, 0.1, 4, 0, 3, "Envelope Amount","%.1f %%");
+  md_ctl_cell(CT_KNOB,   32, 0,  -1, 1, 0.01, 5, 0, 3, "Envelope Curve",  "%+.2f");
 
-  md_ctl_cell(CT_SELECT, 33, 0,   0, 4,   1, 0, 1, 3, "FILTER",      "Off|Lowpass|Highpass|Bandpass|Notch");
-  md_ctl_cell(CT_KNOB,   34, 64,  0, 127, 0.1, 1, 1, 3, "CUTOFF",    "note %.0f");
-  md_ctl_cell(CT_KNOB,   35, 24, 0.5, 60, 0.1, 2, 1, 3, "WIDTH",     "%.1f st");
-  md_ctl_cell(CT_KNOB,   36, 12,  0, 48, 0.1, 3, 1, 3, "SLOPE",      "%.1f st");
-  md_ctl_cell(CT_KNOB,   37, 0,   0, 100, 0.1, 4, 1, 3, "RESONANCE", "%.1f %%");
-  md_ctl_cell(CT_KNOB,   38, 0,-100, 100, 1, 5, 1, 3, "KEY TRACK",   "%+d %%");
-  md_ctl_cell(CT_KNOB,   39, 5,   0, 100, 1, 6, 1, 3, "THRESHOLD",   "%d %%");
+  md_ctl_cell(CT_SELECT, 33, 0,   0, 4,   1, 0, 1, 3, "Filter",      "Off|Lowpass|Highpass|Bandpass|Notch");
+  md_ctl_cell(CT_KNOB,   34, 64,  0, 127, 0.1, 1, 1, 3, "Cutoff",    "note %.0f");
+  md_ctl_cell(CT_KNOB,   35, 24, 0.5, 60, 0.1, 2, 1, 3, "Width",     "%.1f semitones");
+  md_ctl_cell(CT_KNOB,   36, 12,  0, 48, 0.1, 3, 1, 3, "Slope",      "%.1f semitones");
+  md_ctl_cell(CT_KNOB,   37, 0,   0, 100, 0.1, 4, 1, 3, "Resonance", "%.1f %%");
+  md_ctl_cell(CT_KNOB,   38, 0,-100, 100, 1, 5, 1, 3, "Key Tracking", "%+d %%");
+  md_ctl_cell(CT_KNOB,   39, 5,   0, 100, 1, 6, 1, 3, "Threshold",   "%d %%");
 
   // ---- page 4: SLICE -------------------------------------------------------
-  md_ctl_cell(CT_SELECT, 40, 0,   0, 4,   1, 0, 0, 4, "METHOD",      "Divisions|Beats|Onsets|Pitch Changes|Manual Markers");
-  md_ctl_cell(CT_KNOB,   41, 16,  1, 128, 1, 1, 0, 4, "DIVISIONS",   "%d");
-  md_ctl_cell(CT_SELECT, 42, 1,   0, 6,   1, 2, 0, 4, "GRID",        "1/32|1/16|1/8|1/4|1/2|1 Bar|2 Bars");
-  md_ctl_cell(CT_KNOB,   43, 50,  0, 100, 1, 3, 0, 4, "SENSITIVITY", "%d %%");
-  md_ctl_cell(CT_KNOB,   44, 36,  0, 127, 1, 4, 0, 4, "MAP ROOT",    "note %d");
-  md_ctl_cell(CT_SELECT, 45, 0,   0, 1,   1, 5, 0, 4, "GATE",        "Until Slice End|While Held");
+  md_ctl_cell(CT_SELECT, 40, 0,   0, 4,   1, 0, 0, 4, "Method",      "Divisions|Beats|Onsets|Pitch Changes|Manual Markers");
+  md_ctl_cell(CT_KNOB,   41, 16,  1, 128, 1, 1, 0, 4, "Divisions",   "%d");
+  md_ctl_cell(CT_SELECT, 42, 1,   0, 6,   1, 2, 0, 4, "Grid",        "1/32|1/16|1/8|1/4|1/2|1 Bar|2 Bars");
+  md_ctl_cell(CT_KNOB,   43, 50,  0, 100, 1, 3, 0, 4, "Sensitivity", "%d %%");
+  md_ctl_cell(CT_KNOB,   44, 36,  0, 127, 1, 4, 0, 4, "Map Root",    "note %d");
+  md_ctl_cell(CT_SELECT, 45, 0,   0, 1,   1, 5, 0, 4, "Gate",        "Until Slice End|While Held");
 
   // ---- page 5: GRANULAR ----------------------------------------------------
-  md_ctl_cell(CT_KNOB,   46, 16,  1, 256, 1, 0, 0, 5, "GRAINS",      "%d");
-  md_ctl_cell(CT_KNOB,   47, 0.25, 0.01, 8, 0.001, 1, 0, 5, "SIZE",  "%.3f bt");
-  md_ctl_cell(CT_KNOB,   48, 0,   0, 100, 0.1, 2, 0, 5, "SPRAY",     "%.1f %%");
-  md_ctl_cell(CT_KNOB,   49, 0,  -4, 4, 0.001, 3, 0, 5, "MOTION",    "%+.3f");
-  md_ctl_cell(CT_SELECT, 50, 0,   0, 3,   1, 4, 0, 5, "DIRECTION",   "Forward|Reverse|Alternate|Random");
-  md_ctl_cell(CT_KNOB,   51, 100, 1, 100, 1, 5, 0, 5, "DENSITY",     "%d %%");
-  md_ctl_cell(CT_KNOB,   52, 0,   0, 24,  1, 6, 0, 5, "PITCH SPREAD","%d st");
+  md_ctl_cell(CT_KNOB,   46, 16,  1, 256, 1, 0, 0, 5, "Grains",      "%d");
+  md_ctl_cell(CT_KNOB,   47, 0.25, 0.01, 8, 0.001, 1, 0, 5, "Size",  "%.3f beats");
+  md_ctl_cell(CT_KNOB,   48, 0,   0, 100, 0.1, 2, 0, 5, "Spray",     "%.1f %%");
+  md_ctl_cell(CT_KNOB,   49, 0,  -4, 4, 0.001, 3, 0, 5, "Motion",    "%+.3f");
+  md_ctl_cell(CT_SELECT, 50, 0,   0, 3,   1, 4, 0, 5, "Direction",   "Forward|Reverse|Alternate|Random");
+  md_ctl_cell(CT_KNOB,   51, 100, 1, 100, 1, 5, 0, 5, "Density",     "%d %%");
+  md_ctl_cell(CT_KNOB,   52, 0,   0, 24,  1, 6, 0, 5, "Pitch Spread","%d semitones");
 
-  md_ctl_cell(CT_SELECT, 53, 0,   0, 2,   1, 0, 1, 5, "SPREAD",      "Even|Random|Cloud");
-  md_ctl_cell(CT_KNOB,   54, 1,   1, 999, 1, 1, 1, 5, "SEED",        "%d");
+  md_ctl_cell(CT_SELECT, 53, 0,   0, 2,   1, 0, 1, 5, "Spread",      "Even|Random|Cloud");
+  md_ctl_cell(CT_KNOB,   54, 1,   1, 999, 1, 1, 1, 5, "Seed",        "%d");
 );
 
 function md_reset_state() local(i)

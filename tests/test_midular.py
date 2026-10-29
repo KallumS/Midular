@@ -100,7 +100,7 @@ check('slice: keys 36/37/43 select slices 1/2/8', [e[2] for e in ons(ev)] == [60
 ev = play(mk([(2, 2), (40, 0), (41, 8), (44, 36)]), {0: [note_on(0, 20, 100)]}, 60)
 check('slice: unmapped key does not trigger', len(ons(ev)) == 0)
 
-h = mk([(2, 3), (46, 8), (47, 0.25), (53, 0)])
+h = mk([(2, 3), (46, 8), (47, 0.25), (48, 0), (53, 0)])
 ev = play(h, {0: [note_on(0, 60, 100)], 300: [note_off(0, 60)]}, 400)
 check('granular: 8 grains produce a dense cloud', len(ons(ev)) > 100, '%d note-ons' % len(ons(ev)))
 check('granular: cloud closes every note', len(ons(ev)) == len(offs(ev)))
@@ -208,6 +208,160 @@ h = mk([(2, 3), (46, 256), (47, 0.1)])
 ev = play(h, {0: [note_on(0, 60, 100)], 200: [note_off(0, 60)]}, 260)
 check('256 grains run clean', sounding(h) == 0 and active_voices(h) == 0 and len(ons(ev)) > 500,
       '%d note-ons in %.1fs' % (len(ons(ev)), time.time() - t0))
+
+# ------------------------------------------------------------ shipped defaults
+section('factory settings')
+# Every mode, untouched: press a key, let go, wait. Nothing may keep playing.
+# (One-Shot and Slice once looped forever here: Loop defaults on and both
+# ignore note-off, and the older tests hid it by switching Loop off.)
+for mode, name, key in [(0, 'classic', 60), (1, 'one-shot', 60), (2, 'slice', 36), (3, 'granular', 60)]:
+    h = mk([(2, mode)], src=DEMO)
+    ev = play(h, {0: [note_on(0, key, 100)], 10: [note_off(0, key)]}, 1000)
+    late = [e for e in ons(ev) if e[0] > 600 * BL]
+    check('%s stops by itself after the key is released' % name,
+          not late and sounding(h) == 0 and active_voices(h) == 0,
+          '%d late note-ons, %d voices left' % (len(late), active_voices(h)))
+
+h = mk([(2, 0)])
+play(h, {0: [note_on(0, 60, 100)]}, 20)
+h.set_slider(2, 1)                    # switch to One-Shot with the key still down
+play(h, {0: [note_off(0, 60)]}, 60)
+check('switching mode while a key is held does not strand it', active_voices(h) == 0)
+
+ev = play(mk([(2, 1), (22, 1), (24, 25), (25, 25)]), {0: [note_on(0, 60, 100)]}, 400)
+check('one-shot with loop count 0 plays the whole region once', len(ons(ev)) == 8,
+      '%d note-ons' % len(ons(ev)))
+
+h = mk([(2, 2), (40, 0), (41, 4), (45, 1)])
+ev = play(h, {0: [note_on(0, 36, 100)], 300: [note_off(0, 36)]}, 400)
+check('slice "while held" still loops until note-off',
+      len(ons(ev)) > 4 and active_voices(h) == 0, '%d note-ons' % len(ons(ev)))
+
+dflt = [(46, 4), (47, 1), (48, 20), (53, 2)]
+h = mk([(2, 3)], src=DEMO)
+check('granular defaults are 4 grains, 1 beat, cloud, 20% spray',
+      all(h.ip.g['slider%d' % k] == v for k, v in dflt))
+ev = play(h, {0: [note_on(0, 60, 100)]}, 375)
+check('granular defaults stay playable (< 60 notes/s)', len(ons(ev)) / 4.0 < 60,
+      '%.0f notes/s' % (len(ons(ev)) / 4.0))
+
+# -------------------------------------------------------------- randomness
+section('randomness')
+h = mk()
+ip = h.ip
+addr = int(ip.g['SCRATCH'])
+ip.mem[addr] = 1.0
+xs = [ip.call('md_rndm', [('num', float(addr))], None) for _ in range(2000)]
+check('generator is uniform, not a short cycle',
+      len(set(xs)) == 2000 and 0.45 < sum(xs) / len(xs) < 0.55 and min(xs) < 0.05 and max(xs) > 0.95,
+      'mean %.3f, %d distinct' % (sum(xs) / len(xs), len(set(xs))))
+v = [e[3] for e in ons(play(mk([(2, 0), (22, 1), (7, 0), (8, 50), (12, 20)], FLAT),
+                            {0: [note_on(0, 60, 100)]}, 400))]
+check('humanize velocity moves both ways', min(v) < 63 < max(v), '%d..%d' % (min(v), max(v)))
+h = mk([(2, 3), (46, 8), (47, 0.5), (50, 3)])
+ip = h.ip
+G = {k: int(ip.g[k]) for k in ('STREAMS', 'S_STRIDE', 'S_DIR', 'MAX_VOICES')}
+dirs = set()
+for i in range(120):
+    h.block(BL, [note_on(0, 60, 100)] if i == 0 else [])
+    for g in range(8):                # grain g owns stream MAX_VOICES + g
+        sp = G['STREAMS'] + (G['MAX_VOICES'] + g) * G['S_STRIDE']
+        if ip.mem[sp]: dirs.add(ip.mem[sp + G['S_DIR']])
+check('random grain direction picks both directions', dirs == {1.0, -1.0}, str(sorted(dirs)))
+
+# ------------------------------------------------------------ timing fixes
+section('timing')
+h = mk([(2, 0), (22, 1), (14, 1)])
+ev = play(h, {0: [note_on(0, 60, 100)]}, 100, 120.0)
+ev2 = play(h, {}, 100, 240.0)
+o1, o2 = ons(ev), ons(ev2)
+g1, g2 = o1[-1][0] - o1[-2][0], o2[-1][0] - o2[-2][0]
+check('a held voice follows a tempo change', abs(g1 - 12000) < 3 and abs(g2 - 6000) < 3,
+      'gap %d -> %d samples' % (g1, g2))
+
+h = mk([(2, 1), (18, 3), (22, 0)])
+h.ip.g['play_state'] = 5.0
+ev = play(h, {0: [note_on(100, 60, 100)]}, 200)
+check('trigger quantize also applies while recording', abs(ons(ev)[0][0] - 23936) < 700,
+      'first on at %d' % ons(ev)[0][0])
+
+h = mk([(2, 0), (22, 1), (17, 1), (21, 1)])
+h.beat = 1.5
+ev = play(h, {0: [note_on(0, 60, 100)]}, 20)
+check('transport lock in reverse starts at the mirrored phase', ons(ev)[0][2] == 60,
+      'first pitch %d' % ons(ev)[0][2])
+
+ev = play(mk([(2, 1), (22, 0)], fixtures.retrig()), {0: [note_on(0, 60, 100)]}, 60)
+check('a repeated note ends on time, not at the next note-on',
+      [e[0] for e in offs(ev)][:1] == [9600] and [e[0] for e in ons(ev)] == [0, 9696],
+      'offs %s ons %s' % ([e[0] for e in offs(ev)], [e[0] for e in ons(ev)]))
+
+ev = play(mk([(2, 1), (22, 0), (11, 60)], FLAT), {0: [note_on(0, 60, 100)]}, 200)
+late = [e[0] - i * 12000 for i, e in enumerate(ons(ev))]
+check('humanize timing can push a note past the block end',
+      len(late) == 8 and max(late) > BL and min(late) >= 0 and max(late) <= 2880 and len(offs(ev)) == 8,
+      'delays %s' % late)
+
+v = [e[3] for e in ons(play(mk([(2, 0), (22, 1), (7, 0), (28, 0), (29, 50), (30, 2000), (32, 0.2)], FLAT),
+                            {0: [note_on(0, 60, 100)], 100: [note_off(0, 60)]}, 200))]
+# notes every 12000 samples; the key goes up at 51200, so v[5] is the first released note
+check('release starts where sustain was (curve applied once)', v[5] >= 0.75 * v[4], str(v[:6]))
+
+# --------------------------------------------------------------- MIDI input
+section('MIDI input')
+h = mk([(2, 0), (22, 1)])
+out = []
+for i in range(20):
+    out += h.block(BL, {0: [(0, 0xB0, 64, 127), note_on(0, 60, 100)], 10: [(0, 0xB0, 64, 0)]}.get(i, []))
+check('sustain pedal is consumed, not passed to the instrument',
+      not [m for m in out if (m[1] & 0xF0) == 0xB0 and m[2] == 64])
+h = mk([(2, 0), (22, 1)])
+out = []
+for i in range(3):
+    out += h.block(BL, [(0, 0xB1, 1, 90), (0, 0xE0, 0, 64)] if i == 0 else [])
+check('other CCs and pitch bend still pass', [(m[1], m[2]) for m in out] == [(0xB1, 1), (0xE0, 0)])
+
+# --------------------------------------------------------- phrases and markers
+section('phrases and markers')
+def ctrl_click(h, frac):
+    ip = h.ip
+    ip.g.update(mouse_x=ip.g['RL_X'] + ip.g['RL_W'] * frac, mouse_y=ip.g['RL_Y'] + 40, mouse_cap=5.0)
+    h.gfx(); ip.g['mouse_cap'] = 0.0; h.gfx()
+
+def markers(h):
+    ip = h.ip
+    return [round(ip.mem[int(ip.g['MARKERS']) + i], 3) for i in range(int(ip.g['md_nmark']))]
+
+h = mk()
+h.ip.file_paths[1] = DEMO
+ctrl_click(h, 0.75)
+check('ctrl-click adds a marker to the phrase', markers(h) == [2.0, 3.0], str(markers(h)))
+h.ip.g['md_reload'] = 1.0; h.block(BL)
+check('edited markers survive a reload before saving', markers(h) == [2.0, 3.0], str(markers(h)))
+state = h.save_state()
+h2 = Host(JSFX, ARP); h2.load_state(state); h2.block(BL)
+check('edited markers are restored from the project', markers(h2) == [2.0, 3.0], str(markers(h2)))
+h.ip.g['slider1'] = 1.0; h.block(BL)
+check('switching phrase uses the new phrase\'s own markers', markers(h) == [2.0, 4.0, 6.0], str(markers(h)))
+
+h = mk()
+h.ip.file_paths[1] = DEMO
+play(h, {0: [note_on(0, 60, 100)]}, 10)
+import runtime as _rt
+_orig = _rt.BUILTIN['strcpy_fromslider']
+def _mid_scan(ip, a, _calls=[]):
+    _calls.append(1)
+    if len(_calls) == 2:              # audio thread runs while slider1 points at another file
+        h.block(BL)
+    return _orig(ip, a)
+_rt.BUILTIN['strcpy_fromslider'] = _mid_scan
+ip = h.ip
+ip.g.update(mouse_x=400.0, mouse_y=20.0, mouse_cap=1.0); h.gfx(); ip.g['mouse_cap'] = 0.0
+_rt.BUILTIN['strcpy_fromslider'] = _orig
+out = h.block(BL)
+check('opening the file menu does not reload the phrase',
+      h.ip.g['md_src_n'] == 8 and active_voices(h) == 1 and int(ip.g['md_nfiles']) == 2,
+      'notes %d, voices %d, files %d' % (h.ip.g['md_src_n'], active_voices(h), ip.g['md_nfiles']))
 
 # ----------------------------------------------------------------------- UI
 section('interface')

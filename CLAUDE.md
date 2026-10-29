@@ -12,7 +12,7 @@ inspect the MIDI that comes out. **Run both suites after any change** — they a
 the only verification available without the DAW.
 
 ```
-python3 tests/test_midular.py     # 54 checks: engine, modes, slicing, env, filter, UI
+python3 tests/test_midular.py     # 80 checks: engine, modes, slicing, env, filter, UI
 lua5.4  tests/test_import.lua      # 18 checks: the importer's SMF reader
 ```
 
@@ -21,7 +21,16 @@ The interpreter lives in `tests/eel2.py` (lexer/parser), `tests/runtime.py`
 imports). If you use an EEL2 feature the project does not use yet, you will
 probably have to teach the interpreter about it — that is expected and cheap.
 It does not implement FFT/MDCT, `@sample`, MIDI buses or real drawing, and
-`gfx_showmenu()` always returns "nothing selected".
+`gfx_showmenu()` always returns "nothing selected". `Host.save_state()` /
+`load_state()` drive `@serialize` in both directions.
+
+**The harness was written by the same hand as the plug-in, so it shares its
+assumptions.** Every bug found so far in REAPER or in review sat exactly where
+the harness was more lenient than EEL2 (scientific notation, `%` past 32 bits).
+When you learn how EEL2 really behaves, make the harness *refuse* the wrong
+thing rather than just fixing the code. And test the factory defaults: the
+original one-shot/slice tests switched Loop off, which hid the fact that with
+the shipped settings those modes never stopped.
 
 The harness is ~1000x slower than real JSFX. **This says nothing about the
 plug-in's performance**: EEL2 is JIT-compiled to native code, so 256 grains is
@@ -45,9 +54,13 @@ several of them are not obvious.
 - **`$'c'` is the documented form for a character code**, not bare `'c'`. The
   graphics reference shows font flags as `'b'`/`'i'`/`'u'` in prose, which is not
   a promise about the lexer — use `$'b'`.
-- **`%` is integer-only.** It converts the absolute values of both operands to
-  integers. Never use it for float modulo — wrap by hand:
-  `x = x - floor((x - a) / L) * L` (see `md_grain_spawn`).
+- **`%` is integer-only, and only safe below 2^31.** It truncates the absolute
+  values of both operands to (at most) 32-bit integers; beyond that the result
+  depends on the CPU. The original Park-Miller generator did `(s * 16807) %
+  2147483647`, which needs ~46 bits, so in REAPER "random" collapsed into a
+  3-value cycle (random direction always reverse, humanize only ever quieter).
+  Use `md_wrap_int(x, m)` (floor-based, exact below 2^53) for big values and
+  for float modulo. The harness now raises on an out-of-range `%`.
 - **`==` is fuzzy** (equal within 1e-5), and conditionals treat any value with
   magnitude below 1e-5 as false. Use `===` when you need exactness.
 - **Imported files must only *define functions* in their `@init`.** Statements
@@ -138,6 +151,27 @@ written. The ones worth remembering because they are easy to get wrong:
   a time in MIDI, so `md_note_on` emits the previous note-off first. Never emit a
   note-on you cannot later turn off: if the 512-slot pool is full the note is
   dropped deliberately.
+- **Voice speed is recomputed every block.** A voice stores only its own factor
+  (`V_RATESC`, the key-tracking pitch ratio); `md_render_block` multiplies it by
+  the current `md_base_rate`, so held keys follow tempo, Speed and Warp.
+- **Note-ons due after this block are queued, not clamped** (`PEND`,
+  `md_note_on` → `md_pend_flush`). Humanize can push a note up to 60 ms late.
+  Queue slots are free when their owner is `-1` — voice 0 is a real owner, so
+  `md_reset_state` must clear the queue rather than rely on zeroed memory.
+- **Whether a voice ignores note-off is decided at trigger time** (`V_HOLD`:
+  One-Shot, or Slice with Gate "Until Slice End"). A hold voice must have a
+  natural end, so for it Loop Count 0 means "play once", not "forever"
+  (`md_voice_start`, `md_stream_end`). Never let a voice exist that neither
+  note-off nor its own timeline can end.
+- **CC64 is consumed.** Midular applies the pedal to its own voices; passing it
+  on would make the instrument sustain every generated note as well.
+- **Marker edits are mirrored into `MARKERS_SV` immediately**
+  (`md_markers_edited`), because a reload restores from there. Picking a
+  different phrase clears `md_mark_edited` so the new phrase keeps its own
+  markers; a project/preset load (`md_ser_loaded`) does not.
+- **The file-menu scan raises `md_scanning`** while it steps `slider1` from
+  `@gfx`, and `@block` ignores `slider1` until it drops — otherwise the audio
+  thread loads every phrase the scan passes over.
 - **Parameters fan out in `@block`, not `@slider`.** The GUI writes sliders
   directly, and the host does not reliably re-run `@slider` for those writes.
   `@slider` only sets `md_slice_dirty`.
@@ -145,7 +179,8 @@ written. The ones worth remembering because they are easy to get wrong:
   (`md_apply_params`), so it is not recomputed every block.
 - The memory map is one place: `md_init_consts()` in `midular_core.jsfx-inc`.
   Change offsets there and nowhere else, and mind the `MAX_*` ceilings
-  (32768 notes, 256 markers, 128 slices, 16 voices, 256 grains, 512 sounding).
+  (32768 notes, 256 markers, 128 slices, 16 voices, 256 grains, 512 sounding,
+  256 queued note-ons).
 
 ## Adding or changing a parameter
 
@@ -199,28 +234,38 @@ there is no error message, it is the second one.
 
 ## Agreed next steps (not yet implemented)
 
-Discussed and chosen over rewriting as VST3/CLAP:
+Step 1 — the defaults and bugs found in an October 2026 review — is done; the
+invariants above and the `factory settings`, `randomness`, `timing` and
+`phrases and markers` tests cover it. Still to do, in order:
 
-1. **Serialize the phrase itself**, not just the markers, so projects are
-   self-contained and don't depend on a file in `Data/midular/` on whatever
-   machine opens them.
-2. **Have `midular_import.lua` select the phrase it just wrote** in the focused
-   Midular instance. The API reference confirms this is possible and shows a
-   better route than the one first sketched:
+2. **Import through `gmem`, and serialize the phrase into the project.** This
+   replaces the earlier plan of selecting a freshly written `.txt` by stepping
+   the file slider. The importer writes the phrase into shared memory
+   (`options:gmem=Midular` in the JSFX; `reaper.gmem_attach` / `gmem_write` in
+   Lua) and the plug-in copies it into its own memory and stores it in
+   `@serialize`. That removes the `Data/midular` install step, the `.txt`
+   format as the main path, the file-list scan and the visible `slider1`, file
+   parsing on the audio thread, and (I believe) a trap where the project stores
+   the file slider's *position* in the folder list, so adding a file can change
+   which phrase a project opens. `gmem` is global per name, so target one
+   instance: the script bumps a hidden "load ticket" parameter on the chosen FX
+   with `TrackFX_SetParam`, and only the instance whose ticket changed copies
+   the payload. Useful findings from the API reference still apply:
 
    - `TrackFX_SetNamedConfigParm`'s `FILE` / `FILEx` values are **RS5k only** —
      there is no named-config route to a JSFX file slider. Don't go looking.
-   - The file slider is parameter index 0, so `TrackFX_SetParam(tr, fx, 0, n)`
-     sets it and `TrackFX_GetParam` gives the min/max (i.e. how many phrases
-     REAPER found).
-   - Don't guess `n` from alphabetical order. `TrackFX_GetFormattedParamValue(tr,
-     fx, 0)` renders a file slider as its **filename**, so step the parameter and
-     match the name that was just written. That is ordering-agnostic and doubles
-     as a live check of note 2 under *Unverified in REAPER*.
    - Find the instance with `GetTouchedOrFocusedFX(1)` (`GetFocusedFX` is
      deprecated), then confirm with `TrackFX_GetFXName` before touching
      anything; fall back to scanning `CountTracks`/`TrackFX_GetCount` when no
      Midular window is focused.
+   - If the `.txt` path is kept as a fallback, `TrackFX_GetFormattedParamValue`
+     renders a file slider as its **filename** — match on that, never on
+     alphabetical order.
+
+3. **Rework grains.** A grain currently fires only the notes whose *start*
+   falls inside its window, at their full source length. So a grain over a held
+   chord is silent, and short grains don't shorten anything. A grain should play
+   every note that *overlaps* its window, clipped to the grain's length.
 
 ## Conventions
 

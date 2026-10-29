@@ -58,7 +58,7 @@ Either way you are asked for a name, and the result lands in
 | Mode | Behaviour |
 | --- | --- |
 | **Classic** | Polyphonic. Each held key plays the phrase, looping for as long as the key is down. Keys transpose (or repitch, see Key Tracking). |
-| **One-Shot** | Monophonic. One trigger plays the phrase from start to finish; note-off is ignored. Retrigger behaviour is Restart, Ignore or Legato. |
+| **One-Shot** | Monophonic. One trigger plays the phrase from start to finish; note-off is ignored. Retrigger behaviour is Restart, Ignore or Legato. Loops only for a set Loop Count (see Looping). |
 | **Slice** | The phrase is chopped and the pieces are laid out from *Map Root* upwards, one slice per key. |
 | **Granular** | Up to 256 grains read small windows of the phrase at once, each with its own position, direction and pitch offset. |
 
@@ -105,6 +105,7 @@ release stage rather than cutting it off.
 **Warping.** *Free* plays at the phrase's own recorded tempo, *Sync* locks it to
 the project (so 1 source beat = 1 project beat), *Fixed Length* stretches the
 whole phrase to a set number of beats. *Speed* multiplies whichever you pick.
+Tempo, Speed and Warp changes also apply to keys that are already held.
 *Start Mode* chooses between retriggering from the region start and locking to
 the project timeline so voices stay phase-aligned to the grid, and *Trigger
 Quantize* delays a trigger to the next 1/16 … 1 bar.
@@ -112,7 +113,9 @@ Quantize* delays a trigger to the next 1/16 … 1 bar.
 **Looping.** *Region Start/Length* trims the part of the phrase that plays at
 all; *Loop Start/Length* sets the loop inside it, so playback can run in from
 before the loop point the way a sampler does. *Loop Mode* is Forward, Reverse or
-Ping-Pong, and *Loop Count* can stop it after *n* passes. *Reverse* mirrors the
+Ping-Pong, and *Loop Count* can stop it after *n* passes. One-Shot, and Slice
+with Gate set to *Until Slice End*, ignore note-off, so they only loop for a set
+Loop Count — at 0 they play the region once instead of looping forever. *Reverse* mirrors the
 phrase — the last note plays first and note lengths are preserved.
 
 ## Interface
@@ -130,9 +133,10 @@ controls.
 ## Notes on behaviour
 
 * The plug-in consumes the notes that trigger it; enable **MIDI Thru** to pass
-  them through as well. CC, pitch bend, aftertouch and SysEx always pass.
-* The sustain pedal (CC64) is honoured, and CC120/CC123 or stopping the
-  transport silences everything cleanly.
+  them through as well. Other CCs, pitch bend, aftertouch and SysEx always pass.
+* The sustain pedal (CC64) holds Midular's voices and is **not** passed on —
+  otherwise the instrument would also sustain every generated note and smear the
+  phrase. CC120/CC123 or stopping the transport silences everything cleanly.
 * **Output Channel** 0 keeps each source note's own channel; 1–16 forces one.
 * A `(channel, pitch)` pair can only sound once at a time in MIDI, so a repeat
   of a note that is already sounding emits its note-off first. Up to 512 output

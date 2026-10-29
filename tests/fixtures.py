@@ -26,3 +26,9 @@ def arp():
 def flat():
     """8 identical notes - isolates the envelope from source velocity."""
     return write('flat.txt', [(i * 0.5, 0.2, 60, 127, 0) for i in range(8)], 4.0)
+
+
+def retrig():
+    """The same pitch twice, the first note ending 96 samples before the second
+    starts (at 120 BPM / 48 kHz) - both inside one 512-sample block."""
+    return write('retrig.txt', [(0.0, 0.4, 60, 100, 0), (0.404, 0.4, 60, 100, 0)], 1.0)

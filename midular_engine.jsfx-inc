@@ -40,12 +40,17 @@ function md_sound_alloc() local(i, slot)
   slot;
 );
 
-function md_note_on(chan, pitch, vel, tsmp, dursmp, owner) local(key, slot, sp, o)
+function md_note_fire(chan, pitch, vel, tsmp, dursmp, owner) local(key, slot, sp, o, prev)
 (
   key = chan * 128 + pitch;
   o   = md_clamp((tsmp - md_blk_start) | 0, 0, max(md_blk_len - 1, 0));
   slot = SOUNDMAP[key] - 1;
-  slot >= 0 ? md_off_at(slot, o);
+  slot >= 0 ? (
+    // the previous note may already be due to end earlier in this block - end
+    // it then, not at the new note-on (offs are only flushed after rendering)
+    prev = SOUND[slot * N_STRIDE + N_OFF] - md_blk_start;
+    md_off_at(slot, min(o, prev));
+  );
   slot = md_sound_alloc();
   slot >= 0 ? (
     sp = SOUND + slot * N_STRIDE;
@@ -55,6 +60,44 @@ function md_note_on(chan, pitch, vel, tsmp, dursmp, owner) local(key, slot, sp, 
     sp[N_OWNER] = owner;
     sp[N_USED]  = 1;
     SOUNDMAP[key] = slot + 1;
+  );
+);
+
+// Note-ons due in a later block are parked in PEND rather than clamped to the
+// end of this one.  A full queue drops the note, like a full sounding pool.
+function md_note_on(chan, pitch, vel, tsmp, dursmp, owner) local(i, pp)
+(
+  tsmp >= md_blk_start + md_blk_len ? (
+    i = 0;
+    while (i < MAX_PEND && PEND[i * P_STRIDE + 5] >= 0) ( i += 1; );
+    i < MAX_PEND ? (
+      pp = PEND + i * P_STRIDE;
+      pp[0] = tsmp; pp[1] = chan; pp[2] = pitch; pp[3] = vel; pp[4] = dursmp; pp[5] = owner;
+    );
+  ) : md_note_fire(chan, pitch, vel, tsmp, dursmp, owner);
+);
+
+function md_pend_flush() local(i, pp, e)
+(
+  e = md_blk_start + md_blk_len;
+  i = 0;
+  while (i < MAX_PEND) (
+    pp = PEND + i * P_STRIDE;
+    (pp[5] >= 0 && pp[0] < e) ? (
+      md_note_fire(pp[1], pp[2], pp[3], pp[0], pp[4], pp[5]);
+      pp[5] = -1;
+    );
+    i += 1;
+  );
+);
+
+// owner < 0 clears the whole queue
+function md_pend_drop(owner) local(i)
+(
+  i = 0;
+  while (i < MAX_PEND) (
+    (owner < 0 || PEND[i * P_STRIDE + 5] == owner) ? PEND[i * P_STRIDE + 5] = -1;
+    i += 1;
   );
 );
 
@@ -77,8 +120,10 @@ function md_notes_off_owner(vi, tsmp) local(i, o)
     (SOUND[i * N_STRIDE + N_USED] && SOUND[i * N_STRIDE + N_OWNER] == vi) ? md_off_at(i, o);
     i += 1;
   );
+  md_pend_drop(vi);
 );
 
+// sounding plus still-queued notes: a voice is not finished while either remain
 function md_owner_notes(vi) local(i, n)
 (
   n = 0;
@@ -87,6 +132,8 @@ function md_owner_notes(vi) local(i, n)
     (SOUND[i * N_STRIDE + N_USED] && SOUND[i * N_STRIDE + N_OWNER] == vi) ? n += 1;
     i += 1;
   );
+  i = 0;
+  while (i < MAX_PEND) ( PEND[i * P_STRIDE + 5] == vi ? n += 1; i += 1; );
   n;
 );
 
@@ -94,12 +141,16 @@ function md_all_notes_off(off) local(i)
 (
   i = 0;
   while (i < MAX_SOUND) ( md_off_at(i, off); i += 1; );
+  md_pend_drop(-1);
 );
 
 // ---------------------------------------------------------------------------
 // Amplitude envelope (sampled at note-on time - MIDI has no continuous level)
 // ---------------------------------------------------------------------------
-function md_env_at(vp, tsmp) local(t, a, d, s, r, lv, c)
+// Linear ADSR level before the curve is applied.  The release stage starts from
+// V_RELLVL, which is stored in this same uncurved space so the curve is only
+// ever applied once.
+function md_env_raw(vp, tsmp) local(t, a, d, s, r, lv)
 (
   a = p_atk * 0.001 * srate;
   d = p_dec * 0.001 * srate;
@@ -115,7 +166,12 @@ function md_env_at(vp, tsmp) local(t, a, d, s, r, lv, c)
     (d > 0 && (t - a) < d) ? lv = 1 + (s - 1) * ((t - a) / d) :
                              lv = s;
   );
-  lv = md_clamp(lv, 0, 1);
+  md_clamp(lv, 0, 1);
+);
+
+function md_env_at(vp, tsmp) local(lv, c)
+(
+  lv = md_env_raw(vp, tsmp);
   c = p_envcurve;
   c > 0.001  ? lv = pow(lv, 1 + c * 3) :
   c < -0.001 ? lv = pow(lv, 1 / (1 - c * 3));
@@ -238,11 +294,15 @@ function md_stream_setup(si, vi, startPos, regA, regB, loopA, loopB, loopen, dir
   sp[S_EVI]      = md_find_ev(dir >= 0 ? ORD_FWD : ORD_REV, dir >= 0 ? KEY_FWD : KEY_REV, md_src_n, p);
 );
 
-function md_stream_end(si) local(sp, SL, na, nb)
+// A voice that ignores note-off (V_HOLD) must have a natural end, so for it a
+// loop count of 0 means "play once" rather than "loop forever" - otherwise it
+// could only be stopped by voice stealing or a panic.
+function md_stream_end(si) local(sp, SL, na, nb, hold)
 (
   sp = STREAMS + si * S_STRIDE;
   sp[S_LOOPS] += 1;
-  (sp[S_LOOPEN] && (p_loopcnt == 0 || sp[S_LOOPS] < p_loopcnt)) ? (
+  hold = VOICES[sp[S_OWNER] * V_STRIDE + V_HOLD];
+  (sp[S_LOOPEN] && (p_loopcnt == 0 ? !hold : sp[S_LOOPS] < p_loopcnt)) ? (
     sp[S_LOOPMODE] == 2 ? (
       SL = md_src_len;
       na = SL - sp[S_SEGB];
@@ -441,7 +501,7 @@ function md_voice_release(vi, tsmp) local(vp)
 (
   vp = VOICES + vi * V_STRIDE;
   vp[V_STATE] == 1 ? (
-    vp[V_RELLVL] = md_env_at(vp, tsmp);
+    vp[V_RELLVL] = md_env_raw(vp, tsmp);
     vp[V_STATE]  = 2;
     vp[V_RELSMP] = tsmp;
     p_rel <= 0 ? md_voice_kill(vi, tsmp);
@@ -491,7 +551,7 @@ function md_quantize_start(tsmp) local(g, bt, tgt)
       p_tquant == 3 ? 1    :
       p_tquant == 4 ? 2    :
       p_tquant == 5 ? md_ts_num * 4 / md_ts_den : 0;
-  (g > 0 && play_state == 1 && md_bps > 0) ? (
+  (g > 0 && md_playing && md_bps > 0) ? (
     bt  = md_blk_beat + (tsmp - md_blk_start) * md_bps;
     tgt = ceil(bt / g - 0.000001) * g;
     tsmp = tsmp + (tgt - bt) / md_bps;
@@ -512,20 +572,25 @@ function md_voice_start(vi, key, vel, chan, tsmp, sl)
   vp[V_RELLVL]   = 1;
   vp[V_SUSHOLD]  = 0;
   vp[V_MODE]     = p_mode;
+  vp[V_HOLD]     = (p_mode == 1) || (p_mode == 2 && p_slgate == 0);
   vp[V_SLICE]    = sl;
   vp[V_NGRAIN]   = 0;
   vp[V_AGE]      = md_agecnt;
   md_agecnt     += 1;
-  vp[V_RNG]      = 1 + ((p_gseed * 7919 + key * 131 + md_agecnt * 17) % 2147483646);
+  vp[V_RNG]      = 1 + md_wrap_int(p_gseed * 7919 + key * 131 + md_agecnt * 17, 2147483646);
   vp[V_STARTSMP] = md_quantize_start(tsmp);
 
   // --- pitch / rate mapping -------------------------------------------------
-  rate = md_base_rate;
+  // V_RATESC is the voice's own speed factor; the tempo-dependent part is
+  // re-applied every block in md_render_block() so held voices follow tempo,
+  // Speed and Warp changes.
   vp[V_TRANSP] = 0;
+  vp[V_RATESC] = 1;
   p_mode != 2 ? (
     p_keytrack == 1 ? vp[V_TRANSP] = key - p_root :
-    p_keytrack == 2 ? rate = rate * pow(2, (key - p_root) / 12);
+    p_keytrack == 2 ? vp[V_RATESC] = pow(2, (key - p_root) / 12);
   );
+  rate = md_base_rate * vp[V_RATESC];
   vp[V_RATE] = rate;
 
   // --- region ---------------------------------------------------------------
@@ -546,19 +611,28 @@ function md_voice_start(vi, key, vel, chan, tsmp, sl)
   la = min(la, lb - 0.0001);
   la < a ? la = a;
 
-  loopen = (p_mode == 3) ? 0 : p_loopon;
+  // a voice that ignores note-off only loops for a finite Loop Count; with
+  // count 0 it plays the region once (see md_stream_end)
+  loopen = (p_mode == 3 || (vp[V_HOLD] && p_loopcnt == 0)) ? 0 : p_loopon;
   dir    = p_reverse ? -1 : 1;
   (loopen && p_loopmode == 1) ? dir = -dir;
   vp[V_DIR] = dir;
 
   // --- transport lock -------------------------------------------------------
   startp = dir >= 0 ? a : b;
-  (p_startmode == 1 && play_state == 1 && p_mode != 2) ? (
+  (p_startmode == 1 && md_playing && p_mode != 2) ? (
     ratio  = md_ratio;
     startp = md_blk_beat + (vp[V_STARTSMP] - md_blk_start) * md_bps;
     startp = startp * ratio;
-    startp = a + (startp - floor(startp / span) * span);
-    startp > b ? startp = a;
+    startp = startp - floor(startp / span) * span;     // phase into the region
+    // reverse playback runs from the region end, so the phase counts back from b
+    dir >= 0 ? (
+      startp = a + startp;
+      startp > b ? startp = a;
+    ) : (
+      startp = b - startp;
+      startp < a ? startp = b;
+    );
   );
 
   p_mode == 3 ? (
@@ -599,7 +673,8 @@ function md_trigger(key, vel, chan, tsmp) local(vi, sl, av, vp)
           vp[V_VEL] = vel;
           p_keytrack == 1 ? vp[V_TRANSP] = key - p_root;
           p_keytrack == 2 ? (
-            vp[V_RATE] = md_base_rate * pow(2, (key - p_root) / 12);
+            vp[V_RATESC] = pow(2, (key - p_root) / 12);
+            vp[V_RATE]   = md_base_rate * vp[V_RATESC];
             STREAMS[av * S_STRIDE + S_RATE] = vp[V_RATE];
           );
         ) : (
@@ -615,19 +690,18 @@ function md_trigger(key, vel, chan, tsmp) local(vi, sl, av, vp)
   );
 );
 
-function md_note_off(key, chan, tsmp) local(i, vp, hold)
+// One-shot always plays to the end; slice mode can be told to do the same.
+// That is decided per voice at trigger time (V_HOLD), so switching mode while a
+// key is down cannot strand a looping voice that no longer listens to note-off.
+function md_note_off(key, chan, tsmp) local(i, vp)
 (
-  // one-shot always plays to the end; slice mode can be told to do the same
-  hold = (p_mode == 1) || (p_mode == 2 && p_slgate == 0);
-  !hold ? (
-    i = 0;
-    while (i < MAX_VOICES) (
-      vp = VOICES + i * V_STRIDE;
-      (vp[V_STATE] == 1 && vp[V_KEY] == key && vp[V_CHAN] == chan) ? (
-        md_sustain ? vp[V_SUSHOLD] = 1 : md_voice_release(i, tsmp);
-      );
-      i += 1;
+  i = 0;
+  while (i < MAX_VOICES) (
+    vp = VOICES + i * V_STRIDE;
+    (vp[V_STATE] == 1 && !vp[V_HOLD] && vp[V_KEY] == key && vp[V_CHAN] == chan) ? (
+      md_sustain ? vp[V_SUSHOLD] = 1 : md_voice_release(i, tsmp);
     );
+    i += 1;
   );
 );
 
@@ -658,10 +732,15 @@ function md_panic(off) local(i)
 function md_render_block() local(i, vp, st, n, e)
 (
   e = md_blk_start + md_blk_len;
+  md_pend_flush();
   i = 0;
   while (i < MAX_VOICES) (
     vp = VOICES + i * V_STRIDE;
     vp[V_STATE] ? (
+      // follow tempo / Speed / Warp changes; grains pick this up on respawn
+      vp[V_RATE] = md_base_rate * vp[V_RATESC];
+      vp[V_NGRAIN] == 0 ? STREAMS[i * S_STRIDE + S_RATE] = vp[V_RATE];
+
       st = max(md_blk_start, vp[V_STARTSMP]);
       n  = e - st;
       n > 0 ? (

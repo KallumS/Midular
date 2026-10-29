@@ -278,8 +278,12 @@ function md_draw_roll() local(i, np, x0, x1, y, h, lo, hi, v, span, s, vp, pos, 
 // ---------------------------------------------------------------------------
 // File selection
 // ---------------------------------------------------------------------------
+// Steps slider1 through the folder and reads each name back.  md_scanning tells
+// @block (another thread) to ignore slider1 meanwhile - otherwise it would load
+// every phrase the scan passes over and cut off whatever is playing.
 function md_scan_files() local(i, sv, done)
 (
+  md_scanning = 1;
   sv = slider1;
   strcpy(#md_filelist, "");
   md_nfiles = 0;
@@ -297,6 +301,7 @@ function md_scan_files() local(i, sv, done)
     );
   );
   slider1 = sv;
+  md_scanning = 0;
   md_nfiles;
 );
 
@@ -308,8 +313,7 @@ function md_file_menu() local(r)
     r = gfx_showmenu(#md_filelist);
     r > 0 ? (
       slider1 = r - 1;
-      sliderchange(slider1);
-      md_reload = 1;
+      sliderchange(slider1);   // @block notices the new value and loads it
     );
   );
 );
@@ -379,6 +383,19 @@ function md_draw_status() local(i, n)
 );
 
 // ---------------------------------------------------------------------------
+// Marker edits are mirrored into MARKERS_SV straight away, so they survive a
+// reload (which restores from MARKERS_SV) even before the project is saved.
+// ---------------------------------------------------------------------------
+function md_markers_edited()
+(
+  md_mark_edited = 1;
+  md_ser_nmark   = md_nmark;
+  md_nmark > 0 ? memcpy(MARKERS_SV, MARKERS, md_nmark);
+  md_slice_dirty = 1;
+  sliderchange(-1);
+);
+
+// ---------------------------------------------------------------------------
 // Main draw + interaction
 // ---------------------------------------------------------------------------
 function md_ui_draw() local(i, c, hot)
@@ -440,9 +457,7 @@ function md_ui_mouse() local(ci, c, dy, rng, t, i, x, w)
       (mouse_cap & 4) ? (
         t = (mouse_x - RL_X) / RL_W * md_src_len;
         md_marker_add(t);
-        md_mark_edited  = 1;
-        md_slice_dirty  = 1;
-        sliderchange(-1);
+        md_markers_edited();
       );
     ) : (
       ci = md_ui_hit();
@@ -473,11 +488,7 @@ function md_ui_mouse() local(ci, c, dy, rng, t, i, x, w)
   (mouse_cap & 2) && !(md_lastcap & 2) ? (
     (mouse_y >= RL_Y && mouse_y < RL_Y + RL_H && mouse_x >= RL_X && mouse_x < RL_X + RL_W) ? (
       t = (mouse_x - RL_X) / RL_W * md_src_len;
-      md_marker_remove_near(t, md_src_len * 0.02) ? (
-        md_mark_edited = 1;
-        md_slice_dirty = 1;
-        sliderchange(-1);
-      );
+      md_marker_remove_near(t, md_src_len * 0.02) ? md_markers_edited();
     );
   );
 

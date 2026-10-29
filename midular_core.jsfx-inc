@@ -81,6 +81,7 @@ function md_init_consts()
   V_GBASE       = 21;         // first grain slot owned by this voice
   V_MODE        = 22;         // mode captured at trigger time
   V_SUSHOLD     = 23;         // note-off arrived while the sustain pedal was down
+  V_HOLD        = 24;         // 1 if note-off is ignored (one-shot, slice "until end")
 
   G_STRIDE      = 8;
   GRAINS        = 369000;
@@ -98,6 +99,12 @@ function md_init_consts()
   N_USED        = 3;
   SOUNDMAP      = 375000;     // 2048 entries: chan*128+pitch -> slot+1
 
+  // note-ons that fall in a later block (humanize can push a note past the end
+  // of the current one); fired by md_pend_flush() when their block comes round
+  MAX_PEND      = 256;
+  P_STRIDE      = 6;
+  PEND          = 382000;     // [time, chan, pitch, vel, dur, owner]
+
   MAX_CTLS      = 224;
   C_STRIDE      = 16;
   CTLS          = 378000;
@@ -113,10 +120,17 @@ function md_init_consts()
 function md_clamp(x, lo, hi) ( x < lo ? lo : (x > hi ? hi : x) );
 
 // Park-Miller LCG whose state lives in memory so every voice/grain can own one.
+//
+// The modulo is done in floating point on purpose.  EEL2's % truncates its
+// operands to (at most) 32-bit integers, but state * 16807 needs ~46 bits, so
+// `%` collapses the generator into a 3-value cycle.  Every intermediate here is
+// an integer below 2^53, so the double arithmetic is exact.
+function md_wrap_int(x, m) ( x - floor(x / m) * m );
+
 function md_rndm(p)
 (
-  p[0] < 1 ? p[0] = 1;
-  p[0] = (p[0] * 16807) % 2147483647;
+  (p[0] < 1 || p[0] >= 2147483647) ? p[0] = 1 + md_wrap_int(floor(abs(p[0])), 2147483646);
+  p[0] = md_wrap_int(p[0] * 16807, 2147483647);
   p[0] * 0.0000000004656612875;
 );
 

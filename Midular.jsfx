@@ -81,14 +81,14 @@ slider44:36<0,127,1>-Slice Map Root
 slider45:0<0,1,1{Until Slice End,While Held}>-Slice Gate
 
 // --- granular ---------------------------------------------------------------
-slider46:16<1,256,1>-Grain Count
-slider47:0.25<0.01,8,0.001>-Grain Size
-slider48:0<0,100,0.1>-Grain Spray
+slider46:4<1,256,1>-Grain Count
+slider47:1<0.01,8,0.001>-Grain Size
+slider48:20<0,100,0.1>-Grain Spray
 slider49:0<-4,4,0.001>-Grain Motion
 slider50:0<0,3,1{Forward,Reverse,Alternate,Random}>-Grain Direction
 slider51:100<1,100,1>-Grain Density
 slider52:0<0,24,1>-Grain Pitch Spread
-slider53:0<0,2,1{Even,Random,Cloud}>-Grain Spread
+slider53:2<0,2,1{Even,Random,Cloud}>-Grain Spread
 slider54:1<1,999,1>-Grain Seed
 
 // --- mono behaviour ---------------------------------------------------------
@@ -261,15 +261,15 @@ function md_build_ui()
   md_ctl_cell(CT_SELECT, 45, 0,   0, 1,   1, 5, 0, 4, "GATE",        "Until Slice End|While Held");
 
   // ---- page 5: GRANULAR ----------------------------------------------------
-  md_ctl_cell(CT_KNOB,   46, 16,  1, 256, 1, 0, 0, 5, "GRAINS",      "%d");
-  md_ctl_cell(CT_KNOB,   47, 0.25, 0.01, 8, 0.001, 1, 0, 5, "SIZE",  "%.3f bt");
-  md_ctl_cell(CT_KNOB,   48, 0,   0, 100, 0.1, 2, 0, 5, "SPRAY",     "%.1f %%");
+  md_ctl_cell(CT_KNOB,   46, 4,   1, 256, 1, 0, 0, 5, "GRAINS",      "%d");
+  md_ctl_cell(CT_KNOB,   47, 1, 0.01, 8, 0.001, 1, 0, 5, "SIZE",  "%.3f bt");
+  md_ctl_cell(CT_KNOB,   48, 20,  0, 100, 0.1, 2, 0, 5, "SPRAY",     "%.1f %%");
   md_ctl_cell(CT_KNOB,   49, 0,  -4, 4, 0.001, 3, 0, 5, "MOTION",    "%+.3f");
   md_ctl_cell(CT_SELECT, 50, 0,   0, 3,   1, 4, 0, 5, "DIRECTION",   "Forward|Reverse|Alternate|Random");
   md_ctl_cell(CT_KNOB,   51, 100, 1, 100, 1, 5, 0, 5, "DENSITY",     "%d %%");
   md_ctl_cell(CT_KNOB,   52, 0,   0, 24,  1, 6, 0, 5, "PITCH SPREAD","%d st");
 
-  md_ctl_cell(CT_SELECT, 53, 0,   0, 2,   1, 0, 1, 5, "SPREAD",      "Even|Random|Cloud");
+  md_ctl_cell(CT_SELECT, 53, 2,   0, 2,   1, 0, 1, 5, "SPREAD",      "Even|Random|Cloud");
   md_ctl_cell(CT_KNOB,   54, 1,   1, 999, 1, 1, 1, 5, "SEED",        "%d");
 );
 
@@ -286,6 +286,7 @@ function md_reset_state() local(i)
     i += 1;
   );
   memset(SOUNDMAP, 0, 2048);
+  md_pend_drop(-1);        // owner 0 is a real voice, so free slots must be -1
   md_sustain = 0;
 );
 
@@ -313,6 +314,8 @@ md_src_tsden  = 4;
 md_nmark      = 0;
 md_nslices    = 0;
 md_slice_hash = -1;
+md_scanning   = 0;
+md_ser_loaded = 0;
 strcpy(#md_name, "(no source)");
 
 @slider
@@ -332,6 +335,7 @@ md_blk_beat  = beat_position;
 md_ts_num    = max(ts_num, 1);
 md_ts_den    = max(ts_denom, 1);
 md_bps       = max(tempo, 1) / 60 / max(srate, 1);
+md_playing   = play_state == 1 || play_state == 5;    // playing or recording
 
 // ---- transport ------------------------------------------------------------
 play_state != md_lastplay ? (
@@ -340,7 +344,16 @@ play_state != md_lastplay ? (
 );
 
 // ---- (re)load the source file --------------------------------------------
-slider1 != md_lastfile ? ( md_lastfile = slider1; md_reload = 1; );
+// md_scanning: the GUI is stepping slider1 to list the available files (see
+// md_scan_files); those values are not a choice, so don't load them.
+(slider1 != md_lastfile && !md_scanning) ? (
+  // a different phrase was picked: edited markers belonged to the old one.  A
+  // project/preset load (md_ser_loaded) brings its own markers, so keep those.
+  (md_lastfile >= 0 && !md_ser_loaded) ? md_mark_edited = 0;
+  md_lastfile = slider1;
+  md_reload = 1;
+);
+md_ser_loaded = 0;
 md_reload ? (
   md_reload = 0;
   md_panic(0);
@@ -374,8 +387,9 @@ while (midirecv(md_off, md_m1, md_m2, md_m3)) (
     p_thru ? midisend(md_off, md_m1, md_m2, md_m3);
   ) :
   (md_st == $xB0 && md_m2 == 64) ? (
+    // consumed, not passed on: the instrument downstream would otherwise
+    // sustain every generated note as well and smear the phrase
     md_m3 >= 64 ? md_sustain = 1 : ( md_sustain = 0; md_sustain_off(md_t); );
-    midisend(md_off, md_m1, md_m2, md_m3);
   ) :
   (md_st == $xB0 && (md_m2 == 120 || md_m2 == 123)) ? (
     md_panic(md_off);
@@ -399,14 +413,13 @@ md_ser_avail >= 3 ? (
   md_ser_nmark = md_clamp(md_ser_nmark | 0, 0, MAX_MARKERS);
   md_ser_nmark > 0 ? file_mem(0, MARKERS_SV, md_ser_nmark);
   md_reload = 1;
+  md_ser_loaded = 1;
 ) : (
   md_ser_avail < 0 ? (
+    // MARKERS_SV / md_ser_nmark are kept in step with every edit by
+    // md_markers_edited(), so a reload between edits and a save keeps them too
     md_ser_ver = 1;
-    md_mark_edited ? (
-      md_ser_nmark = md_clamp(md_nmark | 0, 0, MAX_MARKERS);
-      md_ser_nmark > 0 ? memcpy(MARKERS_SV, MARKERS, md_ser_nmark);
-    );
-    md_ser_nmark = md_clamp(md_ser_nmark | 0, 0, MAX_MARKERS);
+    md_ser_nmark = md_mark_edited ? md_clamp(md_ser_nmark | 0, 0, MAX_MARKERS) : 0;
     file_var(0, md_ser_ver);
     file_var(0, md_mark_edited);
     file_var(0, md_ser_nmark);

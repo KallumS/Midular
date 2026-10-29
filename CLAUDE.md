@@ -127,9 +127,10 @@ several of them are not obvious.
 
 ## ReaScript API (verified against the v7.79 reference)
 
-Every `reaper.*` call in `Scripts/midular_import.lua` has been checked against
-the official signatures — return counts and argument order are correct as
-written. The ones worth remembering because they are easy to get wrong:
+Every `reaper.*` call in `Scripts/midular_import.lua` — all 45, including the
+gmem hand-over and instance lookup added later — has been checked against the
+official signatures; return counts and argument order are correct as written.
+The ones worth remembering because they are easy to get wrong:
 
 - `CountProjectMarkers(proj)` returns **three** values; the first is the combined
   marker+region count that `EnumProjectMarkers(idx)` indexes over. Its `retval`
@@ -141,6 +142,15 @@ written. The ones worth remembering because they are easy to get wrong:
 - `GetTakeMarker(take, idx)` returns the position in **take source seconds**, so
   converting to an item position needs `(src - D_STARTOFFS) / D_PLAYRATE`.
 - `GetUserFileNameForRead(fn, title, defext)` — filename buffer first, title second.
+- `GetTouchedOrFocusedFX(1)` returns `ok, trackidx, itemidx, takeidx, fxidx,
+  parm`: `trackidx` -1 is the master, `itemidx` -1 means a track FX, and `fxidx`
+  may carry 0x1000000 (record-input FX) or 0x2000000 (container), which the
+  `TrackFX_*` calls accept as-is. The deprecated `GetFocusedFX` returns
+  `GetFocusedFX2() & 3` (1 = track FX) with a 1-based track number, 0 = master.
+- `gmem_read` / `gmem_write` take indices in `[0, 1<<25)`; the mailbox uses
+  about 164k.
+- `TrackFX_GetParam` returns `value, min, max` — native units, which is why the
+  importer reads the ticket back to confirm `TrackFX_SetParam` took it.
 
 ## Architecture invariants
 
@@ -251,10 +261,8 @@ Confirmed working in REAPER 7 on macOS:
 
 Still unverified, in rough order of likelihood:
 
-1. **The gmem import, end to end.** Written without access to the API docs
-   (reaper.fm was unreachable from the session), so check in this order:
-   - `GetTouchedOrFocusedFX(1)` returns `ok, trackidx (-1 = master), itemidx
-     (-1 = track FX), takeidx, fxidx, parm` in that order.
+1. **The gmem import, end to end.** The script's API calls are verified (see
+   above); what the reference cannot say is how the JSFX side behaves:
    - The hidden slider's parameter name reads back as `Import Ticket` (the
      script also accepts `-Import Ticket`).
    - `TrackFX_SetParam` on a JSFX slider takes the slider's own units. The

@@ -10,16 +10,17 @@ tags: MIDI sampler slicer granular instrument
 //   Slice      chops the phrase and maps the pieces across the keyboard
 //   Granular   up to 256 independent grains with their own motion and direction
 //
-// Source phrases are imported with Scripts/midular_import.lua and live in
-//   <REAPER resource path>/Data/midular/*.txt
-// See README.md and docs/FORMAT.md.
+// Phrases are imported with Scripts/midular_import.lua, which hands them over
+// through gmem (see md_ticket_poll), and are saved inside the project.  The
+// Source File slider - .txt files in <REAPER resource path>/Data/midular/ -
+// remains as a fallback.  See README.md and docs/FORMAT.md.
 //
 // Copyright (C) 2026  Midular contributors.
 // Licensed under the GNU General Public License v3 (see LICENSE).
 
 in_pin:none
 out_pin:none
-options:no_meter gfx_hz=30
+options:no_meter gfx_hz=30 gmem=Midular
 
 // --- source -----------------------------------------------------------------
 slider1:/midular:default.txt:Source File
@@ -94,6 +95,11 @@ slider54:1<1,999,1>-Grain Seed
 // --- mono behaviour ---------------------------------------------------------
 slider55:0<0,2,1{Restart,Ignore While Playing,Legato}>-One-Shot Retrigger
 slider56:0<0,1,1{Off,On}>-Mono Choke
+
+// --- internal -----------------------------------------------------------------
+// Written by midular_import.lua (TrackFX_SetParam) to address a phrase waiting
+// in the gmem mailbox to this instance.  Not a control; no panel cell.
+slider57:0<0,1000000,1>-Import Ticket
 
 import midular_core.jsfx-inc
 import midular_engine.jsfx-inc
@@ -315,7 +321,9 @@ md_nmark      = 0;
 md_nslices    = 0;
 md_slice_hash = -1;
 md_scanning   = 0;
-md_ser_loaded = 0;
+// Deliberately NOT initialised here: md_stage_ready, md_ticket_seen,
+// md_mark_edited, md_restore_left, md_ser_*.  @serialize can run before
+// @init, and these carry what it restored.  Globals start at 0 anyway.
 strcpy(#md_name, "(no source)");
 
 @slider
@@ -324,6 +332,7 @@ strcpy(#md_name, "(no source)");
 // host does not re-run this section); all that is needed here is to invalidate
 // the cached slice map.
 md_slice_dirty = 1;
+md_ticket_poll(slider57);   // TrackFX_SetParam lands here even with no audio
 
 @block
 
@@ -343,32 +352,45 @@ play_state != md_lastplay ? (
   md_lastplay = play_state;
 );
 
-// ---- (re)load the source file --------------------------------------------
-// md_scanning: the GUI is stepping slider1 to list the available files (see
-// md_scan_files); those values are not a choice, so don't load them.
-(slider1 != md_lastfile && !md_scanning) ? (
-  // a different phrase was picked: edited markers belonged to the old one.  A
-  // project/preset load (md_ser_loaded) brings its own markers, so keep those.
-  (md_lastfile >= 0 && !md_ser_loaded) ? md_mark_edited = 0;
-  md_lastfile = slider1;
-  md_reload = 1;
+// ---- the phrase -------------------------------------------------------------
+// 1. A phrase handed over by the importer (Import Ticket + gmem) or restored by
+//    @serialize waits in STAGE.  Installing it is the audio thread's job.
+md_ticket_poll(slider57);
+md_stage_ready ? (
+  md_stage_ready = 0;
+  md_panic(0);
+  md_install_stage() ? md_reload = 1;
 );
-md_ser_loaded = 0;
-md_reload ? (
-  md_reload = 0;
+
+// 2. The Source File slider (fallback route).  md_scanning: the GUI is stepping
+//    slider1 to list the files (md_scan_files); those values are not a choice.
+md_load_file = md_reload && md_src_kind != 2;     // an embedded phrase has no file
+(slider1 != md_lastfile && !md_scanning) ? (
+  (md_lastfile >= 0 && md_restore_left <= 0) ? (
+    // the user picked a file: it replaces the phrase, edited markers and all
+    md_mark_edited = 0;
+    md_load_file = 1;
+  ) : (
+    // first look, or slider1 arriving with a restored project/undo state: a
+    // phrase the state carried wins; otherwise (version 1 state, or none) the
+    // file is the phrase.  Edited markers are kept either way.
+    md_src_kind != 2 ? md_load_file = 1;
+  );
+  md_lastfile = slider1;
+);
+md_restore_left > 0 ? md_restore_left -= samplesblock;
+md_load_file ? (
   md_panic(0);
   md_fh = file_open(slider1);
   md_fh >= 0 ? (
-    md_load_handle(md_fh) ? strcpy_fromslider(#md_name, slider1) : md_make_default();
+    md_load_handle(md_fh) ? ( strcpy_fromslider(#md_name, slider1); md_src_kind = 1; )
+                          : md_make_default();
     file_close(md_fh);
   ) : md_make_default();
-  // user-edited markers win over whatever the file carried
-  md_mark_edited ? (
-    md_nmark = md_clamp(md_ser_nmark | 0, 0, MAX_MARKERS);
-    md_nmark > 0 ? memcpy(MARKERS, MARKERS_SV, md_nmark);
-  );
-  md_slice_dirty = 1;
+  md_sync_cur();
 );
+(md_load_file || md_reload) ? ( md_apply_markers(); md_slice_dirty = 1; );
+md_reload = 0;
 
 md_apply_params();
 
@@ -404,6 +426,14 @@ md_now += samplesblock;
 
 @serialize
 
+// Version 2 also stores the phrase, so a project plays the same anywhere - it
+// no longer depends on a file in Data/midular/ (or on that file keeping its
+// position in the folder list, which is what the file slider really saves).
+//
+//   ver, markersEdited, nEditedMarkers, editedMarkers[],
+//   ticketSeen, hasPhrase, [phrase block: 7 header values, markers, name, notes]
+//
+// Version 1 stopped after editedMarkers; it still loads.
 md_init_consts();
 md_ser_avail = file_avail(0);
 md_ser_avail >= 3 ? (
@@ -412,18 +442,36 @@ md_ser_avail >= 3 ? (
   file_var(0, md_ser_nmark);
   md_ser_nmark = md_clamp(md_ser_nmark | 0, 0, MAX_MARKERS);
   md_ser_nmark > 0 ? file_mem(0, MARKERS_SV, md_ser_nmark);
+  md_ser_ver >= 2 ? (
+    file_var(0, md_ticket_seen);   // so the restored Import Ticket isn't a new request
+    file_var(0, md_ser_has);
+    md_ser_has ? (
+      md_ser_block(STAGE, STAGE + PB_NOTES, 1);
+      md_stage_ready = STAGE[PB_N] > 0;
+    );
+  );
   md_reload = 1;
-  md_ser_loaded = 1;
+  // REAPER restores slider1 alongside this state, possibly a block or two
+  // apart; for a moment its changes are part of the restore, not a user pick
+  md_restore_left = 0.3 * (md_srate > 0 ? md_srate : 48000);
 ) : (
   md_ser_avail < 0 ? (
     // MARKERS_SV / md_ser_nmark are kept in step with every edit by
     // md_markers_edited(), so a reload between edits and a save keeps them too
-    md_ser_ver = 1;
+    md_ser_ver = 2;
     md_ser_nmark = md_mark_edited ? md_clamp(md_ser_nmark | 0, 0, MAX_MARKERS) : 0;
     file_var(0, md_ser_ver);
     file_var(0, md_mark_edited);
     file_var(0, md_ser_nmark);
     md_ser_nmark > 0 ? file_mem(0, MARKERS_SV, md_ser_nmark);
+    file_var(0, md_ticket_seen);
+    // A phrase still waiting in STAGE is the one that is about to play, so save
+    // that (the importer's undo point can be taken before @block installs it).
+    md_ser_pb    = md_stage_ready ? STAGE : CURHDR;
+    md_ser_notes = md_stage_ready ? STAGE + PB_NOTES : BUF_NOTES;
+    md_ser_has   = (md_stage_ready || md_src_kind >= 1) && md_ser_pb[PB_N] > 0;
+    file_var(0, md_ser_has);
+    md_ser_has ? md_ser_block(md_ser_pb, md_ser_notes, 0);
   );
 );
 

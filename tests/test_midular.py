@@ -3,7 +3,7 @@
 
     python3 tests/test_midular.py
 """
-import os, sys, time
+import os, shutil, subprocess, sys, time
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, HERE)
@@ -17,7 +17,7 @@ ARP = fixtures.arp()
 FLAT = fixtures.flat()
 DEMO = os.path.join(HERE, os.pardir, 'Data', 'midular', 'default.txt')
 
-_state = {'pass': 0, 'fail': 0}
+_state = {'pass': 0, 'fail': 0, 'skip': 0}
 
 
 def check(label, cond, detail=''):
@@ -363,6 +363,136 @@ check('opening the file menu does not reload the phrase',
       h.ip.g['md_src_n'] == 8 and active_voices(h) == 1 and int(ip.g['md_nfiles']) == 2,
       'notes %d, voices %d, files %d' % (h.ip.g['md_src_n'], active_voices(h), ip.g['md_nfiles']))
 
+# --------------------------------------------------------- importing (gmem)
+section('importing through gmem')
+import runtime as _rt
+LUA = shutil.which('lua5.4') or shutil.which('lua')
+
+def lua_mailbox():
+    """The mailbox exactly as Scripts/midular_import.lua writes it."""
+    out = subprocess.run([LUA, os.path.join(HERE, 'gmem_dump.lua')], check=True,
+                         capture_output=True, text=True).stdout
+    return {int(k): float(v) for k, v in (line.split() for line in out.splitlines())}
+
+def mailbox():
+    _rt.GMEM.clear()
+    _rt.GMEM.update(lua_mailbox())
+
+def name(h): return h.ip.sget(h.ip.nstr('#md_name'))
+
+def notes(h):
+    ip = h.ip
+    return [tuple(ip.mem[i * 5 + k] for k in range(5)) for i in range(int(ip.g['md_src_n']))]
+
+LUA_NOTES = [(0.0, 0.5, 60.0, 100.0, 0.0), (1.0, 0.5, 64.0, 90.0, 1.0), (2.0, 1.0, 67.0, 80.0, 2.0)]
+
+if not LUA:
+    print('  SKIPPED: lua5.4 not found - the gmem checks need it to run the importer')
+    _state['skip'] += 1
+else:
+    mailbox()
+    h = mk()
+    h.set_slider(57, 1)                       # what TrackFX_SetParam does: runs @slider
+    G = _rt.GMEM
+    check('@slider takes the phrase and acknowledges', G[4] == 1 and G[2] == 3)
+    check('...but leaves installing it to @block', h.ip.g['md_src_n'] == 8)
+    h.block(BL)
+    check('the imported phrase plays', notes(h) == LUA_NOTES, str(notes(h)))
+    check('name, tempo, time signature and markers arrive',
+          name(h) == 'Lua phrase' and h.ip.g['md_src_tempo'] == 100 and
+          (h.ip.g['md_src_tsnum'], h.ip.g['md_src_tsden']) == (3, 4) and markers(h) == [1.5],
+          '%s %g %s' % (name(h), h.ip.g['md_src_tempo'], markers(h)))
+    h.gfx()
+    check('the header shows it is saved in the project', h.ip.g['md_src_kind'] == 2)
+
+    mailbox()
+    h1, h2 = mk(), mk()
+    h2.set_slider(57, 1); h1.block(BL); h2.block(BL)
+    check('only the instance holding the ticket takes it',
+          h1.ip.g['md_src_n'] == 8 and h2.ip.g['md_src_n'] == 3)
+    h1.set_slider(57, 1); h1.block(BL)
+    check('a phrase is taken once', h1.ip.g['md_src_n'] == 8)
+
+    for label, poke in [('a different ticket is ignored', {3: 7.0}),
+                        ('a half-written phrase is ignored', {2: 1.0}),
+                        ('another protocol version is ignored', {1: 2.0})]:
+        mailbox(); _rt.GMEM.update(poke)
+        h = mk(); h.set_slider(57, 1); h.block(BL)
+        check(label, h.ip.g['md_src_n'] == 8 and _rt.GMEM[4] == 0)
+
+    mailbox()
+    h = mk([(2, 0), (22, 1)])
+    play(h, {0: [note_on(0, 60, 100)]}, 30)
+    h.set_slider(57, 1)
+    play(h, {}, 2)
+    check('importing silences the old phrase cleanly', sounding(h) == 0 and active_voices(h) == 0)
+
+    mailbox()
+    h = mk()
+    ctrl_click(h, 0.75)
+    h.set_slider(57, 1); h.block(BL)
+    check('an imported phrase brings its own markers', markers(h) == [1.5], str(markers(h)))
+
+    # ---- saved in the project
+    mailbox()
+    h = mk(); h.set_slider(57, 1); h.block(BL)
+    ctrl_click(h, 0.5)
+    state = h.save_state()
+    h2 = Host(JSFX, DEMO)                     # a machine where file 0 is another phrase
+    _rt.GMEM[2] = 2.0                         # ...and a ready phrase that happens to carry ticket 1
+    h2.ip.g['slider57'] = 1.0
+    h2.load_state(state); h2.p.run('slider'); h2.block(BL)
+    check('the imported phrase is restored from the project',
+          notes(h2) == LUA_NOTES and name(h2) == 'Lua phrase', name(h2))
+    check('...with its edited markers', markers(h2) == [1.5, 1.5], str(markers(h2)))
+    check('the restored Import Ticket is not a new request', _rt.GMEM[2] == 2.0)
+
+    # undo after picking a file: the state and the file slider come back in
+    # separate blocks, and the late slider must not count as a new pick
+    mailbox()
+    h = mk(); h.ip.file_paths[1] = DEMO
+    h.set_slider(57, 1); h.block(BL)
+    state = h.save_state()
+    h.ip.g['slider1'] = 1.0; h.block(BL)      # user picks default.txt
+    h.load_state(state); h.block(BL)          # undo: state first...
+    h.ip.g['slider1'] = 0.0; h.block(BL)      # ...slider restored a block later
+    check('undo restores the phrase even if the file slider lags',
+          notes(h) == LUA_NOTES, '%d notes' % h.ip.g['md_src_n'])
+    play(h, {}, 30)                           # 0.3 s later a change is a real pick again
+    h.ip.g['slider1'] = 1.0; h.block(BL)
+    check('...and a file picked after that still loads', h.ip.g['md_src_n'] == 36)
+
+    h = Host(JSFX, ARP); h.block(BL)
+    state = h.save_state()
+    h2 = Host(JSFX, DEMO); h2.load_state(state); h2.block(BL)
+    check('a phrase loaded from a file is saved in the project too',
+          h2.ip.g['md_src_n'] == 8 and h2.ip.g['md_src_kind'] == 2, '%d notes' % h2.ip.g['md_src_n'])
+
+    h = Host(JSFX, os.path.join(HERE, 'does-not-exist.txt')); h.block(BL)
+    state = h.save_state()
+    check('the built-in pattern is not stored', state[-1] == 0, str(state[-3:]))
+
+    mailbox()
+    h = mk(); h.set_slider(57, 1)              # taken but not installed yet: the undo point case
+    state = h.save_state()
+    h2 = Host(JSFX, ARP); h2.load_state(state); h2.block(BL)
+    check('a phrase waiting to be installed is the one saved', notes(h2) == LUA_NOTES)
+
+    h = mk()
+    h.ip.file_paths[1] = DEMO
+    h.load_state([1, 1, 2, 1.0, 3.0])          # a version 1 state: edited markers only
+    h.block(BL)
+    check('version 1 project state still loads', markers(h) == [1.0, 3.0] and
+          h.ip.g['md_src_n'] == 8, str(markers(h)))
+
+    mailbox()
+    h = mk(); h.ip.file_paths[1] = DEMO
+    h.set_slider(57, 1); h.block(BL)
+    h.ip.g['slider1'] = 1.0; h.block(BL)
+    check('picking a file afterwards replaces the imported phrase',
+          h.ip.g['md_src_n'] == 36 and h.ip.g['md_src_kind'] == 1 and name(h) == 'default.txt',
+          '%d notes, %s' % (h.ip.g['md_src_n'], name(h)))
+
 # ----------------------------------------------------------------------- UI
 section('interface')
 h = mk()                      # no slider overrides: sliders still hold their defaults
@@ -371,7 +501,11 @@ C, S = int(ip.g['CTLS']), int(ip.g['C_STRIDE'])
 F = {k: int(ip.g[k]) for k in ('C_SL', 'C_DEF', 'C_MIN', 'C_MAX', 'C_X', 'C_Y', 'C_W', 'C_PAGE')}
 n = int(ip.g['md_nctl'])
 sl = sorted(int(ip.mem[C + i * S + F['C_SL']]) for i in range(n))
-check('every slider 2..56 has exactly one control', sl == list(range(2, 57)))
+_decl = [int(m.group(1)) for m in __import__('re').finditer(
+    r'^slider(\d+):', open(JSFX).read(), __import__('re').M)]
+NO_CELL = {1, 57}             # Source File (own button) and Import Ticket (internal)
+check('every panel slider has exactly one control', sl == sorted(set(_decl) - NO_CELL),
+      'declared %d, controls %d' % (len(_decl), len(sl)))
 bad = [int(ip.mem[C + i * S + F['C_SL']]) for i in range(n)
        if abs(ip.mem[C + i * S + F['C_DEF']] - ip.g['slider%d' % int(ip.mem[C + i * S + F['C_SL']])]) > 1e-6]
 check('control defaults match the slider declarations', not bad, str(bad))
@@ -424,5 +558,6 @@ ip.g['mouse_cap'] = 2.0; h.gfx(); ip.g['mouse_cap'] = 0.0; h.gfx()
 check('ctrl-click adds a marker, right-click removes it',
       added == n0 + 1 and ip.g['md_nmark'] == n0 and ip.g['md_mark_edited'] == 1)
 
-print('\n%d passed, %d failed' % (_state['pass'], _state['fail']))
+print('\n%d passed, %d failed%s' % (_state['pass'], _state['fail'],
+      ', %d SKIPPED' % _state['skip'] if _state['skip'] else ''))
 sys.exit(1 if _state['fail'] else 0)

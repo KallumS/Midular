@@ -339,9 +339,13 @@ function md_draw_header() local(x, w)
   gfx_set(0.32, 0.36, 0.44, 1);
   gfx_rect(x, 6, w, 1); gfx_rect(x, 31, w, 1); gfx_rect(x, 6, 1, 26); gfx_rect(x + w - 1, 6, 1, 26);
   gfx_set(0.88, 0.92, 0.98, 1);
-  strcpy_fromslider(#md_tmp, slider1);
-  strlen(#md_tmp) < 1 ? strcpy(#md_tmp, #md_name);
-  md_txt(x + 8, 10, w - 16, 18, #md_tmp, 4);
+  // the playing phrase's own name: after an import or a project load the file
+  // slider no longer says what is playing
+  md_txt(x + 8, 10, w - 96, 18, #md_name, 4);
+  md_src_kind == 2 ? (
+    gfx_set(0.45, 0.90, 0.62, 0.9);
+    md_txt(x + w - 88, 10, 80, 18, "IN PROJECT", 2 | 4);
+  );
 
   gfx_set(0.50, 0.54, 0.62, 1);
   sprintf(#md_tmp, "%d notes   %.2f beats   src %.1f BPM   %d/%d",

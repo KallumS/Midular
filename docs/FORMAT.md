@@ -1,5 +1,10 @@
 # Midular source format (`.txt`)
 
+> Since the gmem import, this is the **fallback** route: `midular_import.lua`
+> normally hands a phrase straight to the plug-in, which stores it in the
+> project. It writes a `.txt` only when there is no Midular to send to. The
+> format below is unchanged and still loads through the Source File selector.
+
 ## Why a text file
 
 JSFX has no Standard MIDI File reader. What it *does* have is a documented text

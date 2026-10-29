@@ -4,7 +4,11 @@ import math, os, re, time
 from eel2 import tokenize, Parser
 
 TRUE_EPS = 0.00001
-MEMSIZE = 500000
+MEMSIZE = 1000000
+
+# gmem[] is shared by every instance (and ReaScripts) attached to the same name.
+# One namespace is enough here; tests reset it with GMEM.clear().
+GMEM = {}
 
 def truthy(v):  return abs(v) >= TRUE_EPS
 def i32(v):     return int(v) & 0xFFFFFFFF
@@ -71,6 +75,8 @@ class Interp:
             for s in n[1]: r = self.ev(s, f)
             return r
         if k == 'index':
+            if n[1] == ('var', 'gmem'):
+                return GMEM.get(int(self.ev(n[2], f) + 0.00001), 0.0)
             a = int(self.ev(n[1], f) + self.ev(n[2], f) + 0.00001)
             if a < 0 or a >= MEMSIZE: raise EelError(f'memory index out of range: {a}')
             return self.mem[a]
@@ -150,6 +156,9 @@ class Interp:
             v = self.binop(o, ('num', cur), ('num', v), f)
         if lhs[0] == 'var':
             return self.setvar(lhs[1], v, f)
+        if lhs[0] == 'index' and lhs[1] == ('var', 'gmem'):
+            GMEM[int(self.ev(lhs[2], f) + 0.00001)] = v
+            return v
         if lhs[0] == 'index':
             a = int(self.ev(lhs[1], f) + self.ev(lhs[2], f) + 0.00001)
             if a < 0 or a >= MEMSIZE: raise EelError(f'memory write out of range: {a}')

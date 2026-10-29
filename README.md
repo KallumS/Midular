@@ -28,9 +28,9 @@ MIDI in ──▶ trigger ──▶ [ mode engine ] ──▶ [ note filter ] �
 
    They must stay in the same folder — the `.jsfx-inc` files are imported by name.
 
-2. Copy `Data/midular/` into `<REAPER resource path>/Data/` so the folder
-   `<resource>/Data/midular/` exists and contains `default.txt`. This is the
-   folder the **Source File** selector browses.
+2. *Optional:* copy `Data/midular/` into `<REAPER resource path>/Data/` for
+   the demo phrase and the **Source File** fallback (see below). Without it
+   Midular starts on a small built-in pattern.
 
 3. Copy `Scripts/midular_import.lua` anywhere and add it with
    Actions → Show action list → New action → Load ReaScript.
@@ -40,9 +40,8 @@ MIDI in ──▶ trigger ──▶ [ mode engine ] ──▶ [ note filter ] �
 
 ## Importing a phrase
 
-JSFX cannot read `.mid` files directly, so phrases are converted once into a
-small text format that JSFX reads natively (see [docs/FORMAT.md](docs/FORMAT.md)).
-`midular_import.lua` does the conversion two ways:
+JSFX cannot read `.mid` files or MIDI items itself, so `midular_import.lua`
+reads them and hands the notes to the plug-in:
 
 * **Select one or more MIDI items** and run the action — it captures those items,
   including take markers and any project markers inside them.
@@ -50,8 +49,22 @@ small text format that JSFX reads natively (see [docs/FORMAT.md](docs/FORMAT.md)
   parses it (format 0 and 1, running status, tempo and time-signature meta
   events, SMPTE or ticks-per-quarter division, marker meta events).
 
-Either way you are asked for a name, and the result lands in
-`<resource>/Data/midular/`. Click Midular's file button to pick it up.
+The phrase goes straight into Midular — no dialog, the plug-in just switches to
+it. Which Midular gets it:
+
+1. the one whose window is open, else
+2. the only one on the selected tracks, else
+3. the only one in the project.
+
+With several and none of those deciding, the script asks you to open the one you
+want. The phrase is **saved in the project**, so the project plays the same on
+any machine and needs no extra files; the header shows it as *IN PROJECT*.
+
+**Fallback:** with no Midular in the project, the script saves the phrase as a
+`.txt` file in `<resource>/Data/midular/` (format in
+[docs/FORMAT.md](docs/FORMAT.md)) instead, for the **Source File** selector.
+Picking a file there replaces the current phrase, and it too is then saved in
+the project.
 
 ## Modes
 
@@ -128,7 +141,7 @@ controls.
 * Drag a knob vertically; hold **ctrl/cmd** for fine adjustment.
 * **Double-click** a knob to reset it to its default.
 * The mouse wheel nudges whatever is under the pointer.
-* Click the file name in the header to switch source phrases.
+* Click the phrase name in the header to pick a `.txt` phrase from `Data/midular/`.
 
 ## Notes on behaviour
 

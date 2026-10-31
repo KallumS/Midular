@@ -51,7 +51,7 @@ small text format that JSFX reads natively (see [docs/FORMAT.md](docs/FORMAT.md)
   events, SMPTE or ticks-per-quarter division, marker meta events).
 
 Either way you are asked for a name, and the result lands in
-`<resource>/Data/midular/`. Click Midular's file button to pick it up.
+`<resource>/Data/midular/`. Click the file name at the top of Midular's window to pick it up.
 
 ## Modes
 
@@ -73,7 +73,7 @@ Five ways to decide where the cuts go:
 * **Pitch Changes** — a new slice whenever the leading (highest) pitch of an
   onset group changes.
 * **Manual Markers** — markers carried in from the import, plus any you place in
-  the editor. **Ctrl-click** the piano roll to add one, **right-click** to remove
+  the editor. **Command-click** the piano roll to add one, **right-click** to remove
   the nearest. Edited markers are saved with the project.
 
 ### Granular
@@ -93,12 +93,12 @@ Grains fade in and out with a raised-cosine velocity window.
 **Note filter.** A filter that removes notes instead of frequencies. *Cutoff* is
 a note number; *Slope* is how many semitones it takes to fade from full to
 silent past the corner; *Width* sets the band for bandpass/notch; *Resonance*
-emphasises notes sitting at the corner; *Key Track* moves the cutoff with the
+emphasises notes sitting at the corner; *Key Tracking* moves the cutoff with the
 played key. Anything whose weight falls below *Threshold* is dropped outright —
 the rest just lose velocity. Filtered-out notes are drawn greyed in the roll.
 
 **Amp envelope.** A standard ADSR sampled at each note-on and applied to
-velocity, with a *Curve* control that bends it and an *Amount* that blends it
+velocity, with an *Envelope Curve* control that bends it and an *Envelope Amount* that blends it
 against the untouched velocity. Releasing a key plays the phrase out through the
 release stage rather than cutting it off.
 
@@ -119,10 +119,10 @@ phrase — the last note plays first and note lengths are preserved.
 
 The piano roll shows the loaded phrase with the region shaded, loop bounds in
 amber, slice boundaries and their numbers in green, markers in violet, and a
-live playhead for every sounding voice or grain. The five tabs below hold the
-controls.
+live playhead for every sounding voice or grain. The five tabs below — Play,
+Warp and Loop, Amp and Filter, Slice and Granular — hold the controls.
 
-* Drag a knob vertically; hold **ctrl/cmd** for fine adjustment.
+* Drag a knob vertically; hold **Command** (Ctrl on Windows) for fine adjustment.
 * **Double-click** a knob to reset it to its default.
 * The mouse wheel nudges whatever is under the pointer.
 * Click the file name in the header to switch source phrases.

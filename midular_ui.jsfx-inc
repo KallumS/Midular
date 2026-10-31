@@ -326,9 +326,9 @@ function md_draw_header() local(x, w)
   md_txt(14, 8, 160, 22, "MIDULAR", 4);
   gfx_setfont(1, "Arial", 13);
   gfx_set(0.45, 0.48, 0.55, 1);
-  md_txt(132, 11, 180, 18, "MIDI SAMPLER", 4);
+  md_txt(132, 11, 180, 18, "MIDI Sampler", 4);
 
-  x = 300; w = 380;
+  x = 300; w = 340;
   (mouse_x >= x && mouse_x < x + w && mouse_y >= 6 && mouse_y < 32) ?
     gfx_set(0.20, 0.28, 0.38, 1) : gfx_set(0.15, 0.16, 0.21, 1);
   gfx_rect(x, 6, w, 26);
@@ -340,9 +340,9 @@ function md_draw_header() local(x, w)
   md_txt(x + 8, 10, w - 16, 18, #md_tmp, 4);
 
   gfx_set(0.50, 0.54, 0.62, 1);
-  sprintf(#md_tmp, "%d notes   %.2f beats   src %.1f BPM   %d/%d",
+  sprintf(#md_tmp, "%d notes · %.2f beats · %.1f BPM · %d/%d",
           md_src_n, md_src_len, md_src_tempo, md_src_tsnum | 0, md_src_tsden | 0);
-  md_txt(696, 11, 212, 18, #md_tmp, 4);
+  md_txt(652, 11, 256, 18, #md_tmp, 2 | 4);
 );
 
 function md_draw_tabs() local(i, x, w, hot)
@@ -355,7 +355,7 @@ function md_draw_tabs() local(i, x, w, hot)
     md_page == i + 1 ? gfx_set(0.18, 0.42, 0.60, 1) : (hot ? gfx_set(0.18, 0.20, 0.25, 1) : gfx_set(0.13, 0.14, 0.18, 1));
     gfx_rect(x, TB_Y, w, TB_H);
     md_page == i + 1 ? gfx_set(1.0, 1.0, 1.0, 1) : gfx_set(0.60, 0.64, 0.72, 1);
-    md_field(#md_tmp, "PLAY|WARP + LOOP|AMP + FILTER|SLICE|GRANULAR", i);
+    md_field(#md_tmp, "Play|Warp and Loop|Amp and Filter|Slice|Granular", i);
     md_txt(x, TB_Y + 5, w, 16, #md_tmp, 1 | 4);
     i += 1;
   );
@@ -369,13 +369,13 @@ function md_draw_status() local(i, n)
   gfx_set(0.11, 0.12, 0.16, 1);
   gfx_rect(0, UI_H - 26, UI_W, 26);
   gfx_set(0.50, 0.54, 0.62, 1);
-  sprintf(#md_tmp, "%d voices   %d slices   warp x%.3f   %s",
+  sprintf(#md_tmp, "%d voices · %d slices · warp ×%.3f · %s",
           n, md_nslices, md_ratio,
-          p_mode == 0 ? "classic" : p_mode == 1 ? "one-shot" : p_mode == 2 ? "slice" : "granular");
-  md_txt(14, UI_H - 22, 500, 18, #md_tmp, 4);
+          p_mode == 0 ? "Classic" : p_mode == 1 ? "One-Shot" : p_mode == 2 ? "Slice" : "Granular");
+  md_txt(14, UI_H - 22, 280, 18, #md_tmp, 4);
   gfx_set(0.34, 0.37, 0.44, 1);
-  md_txt(UI_W - 480, UI_H - 22, 466, 18,
-         "ctrl-drag = fine   double-click = reset   ctrl-click roll = add marker   right-click roll = remove", 2 | 4);
+  md_txt(UI_W - 640, UI_H - 22, 626, 18,
+         "Command-drag to fine-tune · Double-click to reset · Markers: Command-click to add, right-click to remove", 2 | 4);
 );
 
 // ---------------------------------------------------------------------------
@@ -429,7 +429,7 @@ function md_ui_mouse() local(ci, c, dy, rng, t, i, x, w)
   (mouse_cap & 1) && !(md_lastcap & 1) ? (
     md_click_t = time_precise();
     // file button
-    (mouse_y >= 6 && mouse_y < 32 && mouse_x >= 300 && mouse_x < 680) ? md_file_menu() :
+    (mouse_y >= 6 && mouse_y < 32 && mouse_x >= 300 && mouse_x < 640) ? md_file_menu() :
     // tabs
     (mouse_y >= TB_Y && mouse_y < TB_Y + TB_H && mouse_x >= 14) ? (
       i = floor((mouse_x - 14) / 180);

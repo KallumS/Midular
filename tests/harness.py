@@ -41,6 +41,17 @@ class Host:
     def gfx(self):
         self.p.run('gfx')
 
+    # @serialize uses file handle 0 in both directions
+    def save_state(self):
+        self.ip.files[0] = {'toks': [], 'pos': 0, 'write': True}
+        self.p.run('serialize')
+        return self.ip.files.pop(0)['toks']
+
+    def load_state(self, toks):
+        self.ip.files[0] = {'toks': list(toks), 'pos': 0}
+        self.p.run('serialize')
+        self.ip.files.pop(0, None)
+
 def note_on(off, p, v, ch=0):  return (off, 0x90 | ch, p, v)
 def note_off(off, p, ch=0):    return (off, 0x80 | ch, p, 0)
 

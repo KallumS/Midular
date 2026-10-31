@@ -3,17 +3,39 @@
   Imports MIDI into Midular's source format.
 
   Run it with one or more MIDI items selected to capture them, or with nothing
-  selected to pick a Standard MIDI File from disk.  The result is written to
+  selected to pick a Standard MIDI File from disk.
+
+  The phrase goes straight into a Midular instance through shared memory
+  (gmem), and Midular saves it inside the project.  The instance is the one
+  whose window is open; failing that, the only one on the selected tracks, or
+  the only one in the project.
+
+  With no Midular in the project the phrase is saved instead as
 
       <REAPER resource path>/Data/midular/<name>.txt
 
-  which is exactly the folder Midular's "Source File" selector browses.
+  for the plug-in's Source File selector (the older route, kept as a fallback).
 
   Copyright (C) 2026  Midular contributors.  GPL v3.
 --]]
 
 local MAGIC, VERSION = 7473, 1
 local MAX_NOTES = 32768
+local MAX_MARKERS, NAME_MAX = 256, 128
+
+-- gmem mailbox shared with the plug-in.  These offsets mirror md_init_consts()
+-- in midular_core.jsfx-inc (G_* and PB_*) - change both together.
+local GMEM_NAME = "Midular"
+local G = {
+  MAGIC = 0, PROTO = 1, STATE = 2, TICKET = 3, ACK = 4,
+  N = 8, LEN = 9, TEMPO = 10, TSNUM = 11, TSDEN = 12, NMARK = 13, NAMELEN = 14,
+  MARK = 64, NAME = 320, NOTES = 512,
+}
+local GM_PROTO = 1
+local ST_WRITING, ST_READY = 1, 2
+local TICKET_PARAM = "Import Ticket"   -- slider57 in Midular.jsfx
+local TICKET_MAX = 1000000             -- that slider's range
+local ACK_TIMEOUT = 2.0                -- seconds to wait for the plug-in's receipt
 
 -- ---------------------------------------------------------------------------
 -- helpers
@@ -348,11 +370,21 @@ local function parse_smf(data)
 end
 
 -- ---------------------------------------------------------------------------
--- main
+-- finding the Midular instance to load into
+--
+-- A Midular is any FX with a parameter named "Import Ticket".  That is the
+-- parameter the hand-over needs anyway, and unlike the FX name it survives the
+-- user renaming the instance.
 -- ---------------------------------------------------------------------------
-local function main()
-  local items = collect_items()
-  local ph
+local function ticket_param(track, fx)
+  local n = reaper.TrackFX_GetNumParams(track, fx)
+  if n < 57 then return nil end
+  for p = n - 1, 0, -1 do                    -- it is the last slider; search from the end
+    local ok, name = reaper.TrackFX_GetParamName(track, fx, p)
+    if ok and name:gsub("^%-", "") == TICKET_PARAM then return p end
+  end
+  return nil
+end
 
   if #items > 0 then
     ph = phrase_from_items(items)
@@ -368,14 +400,16 @@ local function main()
     if not ph then msg("“" .. path .. "” couldn’t be read. " .. tostring(err) .. "\n\nChoose a .mid file saved from REAPER or another MIDI program.") return end
     ph.name = path:match("([^/\\]+)%.[Mm][Ii][Dd][Ii]?$") or path:match("([^/\\]+)$") or "phrase"
   end
+  if not track then return nil end
+  local p = ticket_param(track, fx)
+  return p and { track = track, fx = fx, param = p } or nil
+end
 
   if #ph.notes == 0 then msg("There are no notes to import.\n\nSelect a MIDI item with notes in it, or select nothing to choose a MIDI file.") return end
 
   local ok, name = reaper.GetUserInputs("Midular Import", 1, "Name (saved in Data/midular),extrawidth=140", ph.name)
   if not ok then return end
-
-  local file = sanitize(name)
-  local path = out_dir() .. "/" .. file
+  local path = out_dir() .. "/" .. sanitize(name)
   local wrote, werr = write_phrase(ph, path)
   if not wrote then msg("“" .. path .. "” couldn’t be saved.\n\n" .. tostring(werr) .. "\n\nCheck that REAPER’s Data folder can be written to, then try again.") return end
 
@@ -385,6 +419,5 @@ local function main()
     #ph.notes, ph.length, #ph.markers, ph.tempo, ph.tsnum, ph.tsden, path))
 end
 
-reaper.Undo_BeginBlock()
 main()
 reaper.Undo_EndBlock("Import MIDI Source into Midular", -1)

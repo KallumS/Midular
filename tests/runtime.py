@@ -4,7 +4,11 @@ import math, os, re, time
 from eel2 import tokenize, Parser
 
 TRUE_EPS = 0.00001
-MEMSIZE = 500000
+MEMSIZE = 1000000
+
+# gmem[] is shared by every instance (and ReaScripts) attached to the same name.
+# One namespace is enough here; tests reset it with GMEM.clear().
+GMEM = {}
 
 def truthy(v):  return abs(v) >= TRUE_EPS
 def i32(v):     return int(v) & 0xFFFFFFFF
@@ -71,6 +75,8 @@ class Interp:
             for s in n[1]: r = self.ev(s, f)
             return r
         if k == 'index':
+            if n[1] == ('var', 'gmem'):
+                return GMEM.get(int(self.ev(n[2], f) + 0.00001), 0.0)
             a = int(self.ev(n[1], f) + self.ev(n[2], f) + 0.00001)
             if a < 0 or a >= MEMSIZE: raise EelError(f'memory index out of range: {a}')
             return self.mem[a]
@@ -118,6 +124,13 @@ class Interp:
             try: return math.pow(a, b)
             except (ValueError, OverflowError): return 0.0
         if op == '%':
+            # EEL2 truncates both operands to (at most) 32-bit integers, and
+            # what happens past that depends on the CPU. Python's ints are
+            # unbounded, which once hid a random generator that collapses in
+            # REAPER - so refuse rather than quietly give the "right" answer.
+            if abs(a) >= 2147483648 or abs(b) >= 2147483648:
+                raise EelError('%% operand out of 32-bit range (%r %% %r): EEL2 would '
+                               'truncate it - wrap with floor() instead' % (a, b))
             ib = int(abs(b))
             return float(int(abs(a)) % ib) if ib else 0.0
         if op == '<<': return float(i32(a) << (int(b) & 31))
@@ -143,6 +156,9 @@ class Interp:
             v = self.binop(o, ('num', cur), ('num', v), f)
         if lhs[0] == 'var':
             return self.setvar(lhs[1], v, f)
+        if lhs[0] == 'index' and lhs[1] == ('var', 'gmem'):
+            GMEM[int(self.ev(lhs[2], f) + 0.00001)] = v
+            return v
         if lhs[0] == 'index':
             a = int(self.ev(lhs[1], f) + self.ev(lhs[2], f) + 0.00001)
             if a < 0 or a >= MEMSIZE: raise EelError(f'memory write out of range: {a}')
@@ -218,6 +234,10 @@ def _file_var(ip, args, f):
     h = int(ip.ev(args[0], f))
     fh = ip.files.get(h)
     v = 0.0
+    if fh and fh.get('write'):                    # @serialize saving
+        v = ip.ev(args[1], f)
+        fh['toks'].append(v)
+        return v
     if fh and fh['pos'] < len(fh['toks']):
         v = fh['toks'][fh['pos']]; fh['pos'] += 1
     if args[1][0] == 'var': ip.setvar(args[1][1], v, f)
@@ -278,12 +298,16 @@ def _file_open(ip, a):
 def _file_avail(ip, a):
     fh = ip.files.get(int(a[0]))
     if not fh: return 0.0
-    return 1.0 if fh['pos'] < len(fh['toks']) else 0.0
+    if fh.get('write'): return -1.0               # JSFX: < 0 means "writing"
+    return float(len(fh['toks']) - fh['pos'])
 
 def _file_mem(ip, a):
     h, off, ln = int(a[0]), int(a[1]), int(a[2])
     fh = ip.files.get(h)
     if not fh: return 0.0
+    if fh.get('write'):
+        fh['toks'].extend(ip.mem[off:off + ln])
+        return float(ln)
     n = min(ln, len(fh['toks']) - fh['pos'])
     for i in range(n): ip.mem[off + i] = fh['toks'][fh['pos'] + i]
     fh['pos'] += n

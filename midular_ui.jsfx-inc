@@ -278,8 +278,12 @@ function md_draw_roll() local(i, np, x0, x1, y, h, lo, hi, v, span, s, vp, pos, 
 // ---------------------------------------------------------------------------
 // File selection
 // ---------------------------------------------------------------------------
+// Steps slider1 through the folder and reads each name back.  md_scanning tells
+// @block (another thread) to ignore slider1 meanwhile - otherwise it would load
+// every phrase the scan passes over and cut off whatever is playing.
 function md_scan_files() local(i, sv, done)
 (
+  md_scanning = 1;
   sv = slider1;
   strcpy(#md_filelist, "");
   md_nfiles = 0;
@@ -297,6 +301,7 @@ function md_scan_files() local(i, sv, done)
     );
   );
   slider1 = sv;
+  md_scanning = 0;
   md_nfiles;
 );
 
@@ -308,8 +313,7 @@ function md_file_menu() local(r)
     r = gfx_showmenu(#md_filelist);
     r > 0 ? (
       slider1 = r - 1;
-      sliderchange(slider1);
-      md_reload = 1;
+      sliderchange(slider1);   // @block notices the new value and loads it
     );
   );
 );
@@ -335,9 +339,13 @@ function md_draw_header() local(x, w)
   gfx_set(0.32, 0.36, 0.44, 1);
   gfx_rect(x, 6, w, 1); gfx_rect(x, 31, w, 1); gfx_rect(x, 6, 1, 26); gfx_rect(x + w - 1, 6, 1, 26);
   gfx_set(0.88, 0.92, 0.98, 1);
-  strcpy_fromslider(#md_tmp, slider1);
-  strlen(#md_tmp) < 1 ? strcpy(#md_tmp, #md_name);
-  md_txt(x + 8, 10, w - 16, 18, #md_tmp, 4);
+  // the playing phrase's own name: after an import or a project load the file
+  // slider no longer says what is playing
+  md_txt(x + 8, 10, w - 96, 18, #md_name, 4);
+  md_src_kind == 2 ? (
+    gfx_set(0.45, 0.90, 0.62, 0.9);
+    md_txt(x + w - 88, 10, 80, 18, "IN PROJECT", 2 | 4);
+  );
 
   gfx_set(0.50, 0.54, 0.62, 1);
   sprintf(#md_tmp, "%d notes · %.2f beats · %.1f BPM · %d/%d",
@@ -376,6 +384,19 @@ function md_draw_status() local(i, n)
   gfx_set(0.34, 0.37, 0.44, 1);
   md_txt(UI_W - 640, UI_H - 22, 626, 18,
          "Command-drag to fine-tune · Double-click to reset · Markers: Command-click to add, right-click to remove", 2 | 4);
+);
+
+// ---------------------------------------------------------------------------
+// Marker edits are mirrored into MARKERS_SV straight away, so they survive a
+// reload (which restores from MARKERS_SV) even before the project is saved.
+// ---------------------------------------------------------------------------
+function md_markers_edited()
+(
+  md_mark_edited = 1;
+  md_ser_nmark   = md_nmark;
+  md_nmark > 0 ? memcpy(MARKERS_SV, MARKERS, md_nmark);
+  md_slice_dirty = 1;
+  sliderchange(-1);
 );
 
 // ---------------------------------------------------------------------------
@@ -440,9 +461,7 @@ function md_ui_mouse() local(ci, c, dy, rng, t, i, x, w)
       (mouse_cap & 4) ? (
         t = (mouse_x - RL_X) / RL_W * md_src_len;
         md_marker_add(t);
-        md_mark_edited  = 1;
-        md_slice_dirty  = 1;
-        sliderchange(-1);
+        md_markers_edited();
       );
     ) : (
       ci = md_ui_hit();
@@ -473,11 +492,7 @@ function md_ui_mouse() local(ci, c, dy, rng, t, i, x, w)
   (mouse_cap & 2) && !(md_lastcap & 2) ? (
     (mouse_y >= RL_Y && mouse_y < RL_Y + RL_H && mouse_x >= RL_X && mouse_x < RL_X + RL_W) ? (
       t = (mouse_x - RL_X) / RL_W * md_src_len;
-      md_marker_remove_near(t, md_src_len * 0.02) ? (
-        md_mark_edited = 1;
-        md_slice_dirty = 1;
-        sliderchange(-1);
-      );
+      md_marker_remove_near(t, md_src_len * 0.02) ? md_markers_edited();
     );
   );
 

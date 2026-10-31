@@ -12,8 +12,10 @@ inspect the MIDI that comes out. **Run both suites after any change** — they a
 the only verification available without the DAW.
 
 ```
-python3 tests/test_midular.py     # 54 checks: engine, modes, slicing, env, filter, UI
-lua5.4  tests/test_import.lua      # 18 checks: the importer's SMF reader
+python3 tests/test_midular.py     # 102 checks: engine, modes, slicing, env, filter,
+                                  #   import hand-over, project state, UI
+lua5.4  tests/test_import.lua      # 38 checks: SMF reader, .txt writer, gmem writer,
+                                  #   picking the Midular instance
 ```
 
 The interpreter lives in `tests/eel2.py` (lexer/parser), `tests/runtime.py`
@@ -21,7 +23,23 @@ The interpreter lives in `tests/eel2.py` (lexer/parser), `tests/runtime.py`
 imports). If you use an EEL2 feature the project does not use yet, you will
 probably have to teach the interpreter about it — that is expected and cheap.
 It does not implement FFT/MDCT, `@sample`, MIDI buses or real drawing, and
-`gfx_showmenu()` always returns "nothing selected".
+`gfx_showmenu()` always returns "nothing selected". `Host.save_state()` /
+`load_state()` drive `@serialize` in both directions, and `runtime.GMEM` is
+the shared `gmem[]` (one namespace, shared by every `Host`, like REAPER).
+
+The import hand-over is tested **across the two languages**: `gmem_dump.lua`
+runs the importer's real `write_gmem` against a stub and prints the mailbox,
+and `test_midular.py` feeds that to the real plug-in. So a layout change on
+one side only fails the suite. Those checks need `lua5.4` (or `lua`) on the
+PATH; without it they are reported as SKIPPED, not passed.
+
+**The harness was written by the same hand as the plug-in, so it shares its
+assumptions.** Every bug found so far in REAPER or in review sat exactly where
+the harness was more lenient than EEL2 (scientific notation, `%` past 32 bits).
+When you learn how EEL2 really behaves, make the harness *refuse* the wrong
+thing rather than just fixing the code. And test the factory defaults: the
+original one-shot/slice tests switched Loop off, which hid the fact that with
+the shipped settings those modes never stopped.
 
 The harness is ~1000x slower than real JSFX. **This says nothing about the
 plug-in's performance**: EEL2 is JIT-compiled to native code, so 256 grains is
@@ -45,9 +63,13 @@ several of them are not obvious.
 - **`$'c'` is the documented form for a character code**, not bare `'c'`. The
   graphics reference shows font flags as `'b'`/`'i'`/`'u'` in prose, which is not
   a promise about the lexer — use `$'b'`.
-- **`%` is integer-only.** It converts the absolute values of both operands to
-  integers. Never use it for float modulo — wrap by hand:
-  `x = x - floor((x - a) / L) * L` (see `md_grain_spawn`).
+- **`%` is integer-only, and only safe below 2^31.** It truncates the absolute
+  values of both operands to (at most) 32-bit integers; beyond that the result
+  depends on the CPU. The original Park-Miller generator did `(s * 16807) %
+  2147483647`, which needs ~46 bits, so in REAPER "random" collapsed into a
+  3-value cycle (random direction always reverse, humanize only ever quieter).
+  Use `md_wrap_int(x, m)` (floor-based, exact below 2^53) for big values and
+  for float modulo. The harness now raises on an out-of-range `%`.
 - **`==` is fuzzy** (equal within 1e-5), and conditionals treat any value with
   magnitude below 1e-5 as false. Use `===` when you need exactness.
 - **Imported files must only *define functions* in their `@init`.** Statements
@@ -105,9 +127,10 @@ several of them are not obvious.
 
 ## ReaScript API (verified against the v7.79 reference)
 
-Every `reaper.*` call in `Scripts/midular_import.lua` has been checked against
-the official signatures — return counts and argument order are correct as
-written. The ones worth remembering because they are easy to get wrong:
+Every `reaper.*` call in `Scripts/midular_import.lua` — all 45, including the
+gmem hand-over and instance lookup added later — has been checked against the
+official signatures; return counts and argument order are correct as written.
+The ones worth remembering because they are easy to get wrong:
 
 - `CountProjectMarkers(proj)` returns **three** values; the first is the combined
   marker+region count that `EnumProjectMarkers(idx)` indexes over. Its `retval`
@@ -119,6 +142,15 @@ written. The ones worth remembering because they are easy to get wrong:
 - `GetTakeMarker(take, idx)` returns the position in **take source seconds**, so
   converting to an item position needs `(src - D_STARTOFFS) / D_PLAYRATE`.
 - `GetUserFileNameForRead(fn, title, defext)` — filename buffer first, title second.
+- `GetTouchedOrFocusedFX(1)` returns `ok, trackidx, itemidx, takeidx, fxidx,
+  parm`: `trackidx` -1 is the master, `itemidx` -1 means a track FX, and `fxidx`
+  may carry 0x1000000 (record-input FX) or 0x2000000 (container), which the
+  `TrackFX_*` calls accept as-is. The deprecated `GetFocusedFX` returns
+  `GetFocusedFX2() & 3` (1 = track FX) with a 1-based track number, 0 = master.
+- `gmem_read` / `gmem_write` take indices in `[0, 1<<25)`; the mailbox uses
+  about 164k.
+- `TrackFX_GetParam` returns `value, min, max` — native units, which is why the
+  importer reads the ticket back to confirm `TrackFX_SetParam` took it.
 
 ## Architecture invariants
 
@@ -138,6 +170,59 @@ written. The ones worth remembering because they are easy to get wrong:
   a time in MIDI, so `md_note_on` emits the previous note-off first. Never emit a
   note-on you cannot later turn off: if the 512-slot pool is full the note is
   dropped deliberately.
+- **Voice speed is recomputed every block.** A voice stores only its own factor
+  (`V_RATESC`, the key-tracking pitch ratio); `md_render_block` multiplies it by
+  the current `md_base_rate`, so held keys follow tempo, Speed and Warp.
+- **Note-ons due after this block are queued, not clamped** (`PEND`,
+  `md_note_on` → `md_pend_flush`). Humanize can push a note up to 60 ms late.
+  Queue slots are free when their owner is `-1` — voice 0 is a real owner, so
+  `md_reset_state` must clear the queue rather than rely on zeroed memory.
+- **Whether a voice ignores note-off is decided at trigger time** (`V_HOLD`:
+  One-Shot, or Slice with Gate "Until Slice End"). A hold voice must have a
+  natural end, so for it Loop Count 0 means "play once", not "forever"
+  (`md_voice_start`, `md_stream_end`). Never let a voice exist that neither
+  note-off nor its own timeline can end.
+- **CC64 is consumed.** Midular applies the pedal to its own voices; passing it
+  on would make the instrument sustain every generated note as well.
+- **Marker edits are mirrored into `MARKERS_SV` immediately**
+  (`md_markers_edited`), because a reload restores from there. Picking a
+  different phrase clears `md_mark_edited` so the new phrase keeps its own
+  markers; a project/preset load (`md_ser_loaded`) does not.
+- **The file-menu scan raises `md_scanning`** while it steps `slider1` from
+  `@gfx`, and `@block` ignores `slider1` until it drops — otherwise the audio
+  thread loads every phrase the scan passes over.
+- **A phrase reaches the engine through STAGE, and only `@block` installs it.**
+  Three routes fill STAGE: the importer (gmem, via `md_ticket_poll`, which
+  runs from both `@slider` and `@block`), `@serialize` reading a project, and
+  — for the `.txt` fallback — nothing (files load straight in `@block`).
+  `md_install_stage()` copies STAGE into `BUF_NOTES` on the audio thread,
+  because that thread is the one reading the notes. All three layouts (gmem
+  mailbox, STAGE, CURHDR) share the *phrase block* offsets `PB_*`;
+  `Scripts/midular_import.lua` mirrors them in its `G` table. Change both.
+- **The gmem mailbox is addressed by ticket.** `gmem` is one namespace for
+  every instance, so the script writes the phrase, sets `G_STATE` to ready
+  *last*, and only then puts the ticket on one instance's hidden `slider57`
+  (Import Ticket) with `TrackFX_SetParam`. The instance whose ticket changed,
+  and matches `G_TICKET`, copies it, sets `G_STATE` to taken and echoes the
+  ticket in `G_ACK` (the script waits up to 2 s for that). `md_ticket_seen` is
+  saved in the project so a restored ticket is never a new request.
+- **The playing phrase is saved in the project** (`@serialize` version 2) —
+  whether it came from the importer or a `.txt`. `md_src_kind` says where it
+  came from: 0 built-in pattern (not saved), 1 file, 2 embedded (imported or
+  restored). A kind-2 phrase is never replaced by the file slider's value,
+  only by the user *changing* it. CURHDR mirrors the playing phrase's header
+  (`md_sync_cur`) so serialize writes every kind the same way; a phrase still
+  waiting in STAGE is saved instead, because the importer's undo point can be
+  taken before `@block` installs it.
+- **For 0.3 s after `@serialize` reads, slider1 changes are part of the
+  restore** (`md_restore_left`), not the user picking a file. REAPER may apply
+  the slider and the state a block or two apart; without the window, undo
+  could load a file over the restored phrase. Storing slider1's value in the
+  state was tried and rejected: on another machine with fewer files REAPER
+  clamps the slider, and the mismatch then reads as a pick.
+- **Some globals must not be initialised in `@init`** — `md_stage_ready`,
+  `md_ticket_seen`, `md_mark_edited`, `md_restore_left`, `md_ser_*` —
+  because `@serialize` can run first and they carry what it restored.
 - **Parameters fan out in `@block`, not `@slider`.** The GUI writes sliders
   directly, and the host does not reliably re-run `@slider` for those writes.
   `@slider` only sets `md_slice_dirty`.
@@ -145,7 +230,9 @@ written. The ones worth remembering because they are easy to get wrong:
   (`md_apply_params`), so it is not recomputed every block.
 - The memory map is one place: `md_init_consts()` in `midular_core.jsfx-inc`.
   Change offsets there and nowhere else, and mind the `MAX_*` ceilings
-  (32768 notes, 256 markers, 128 slices, 16 voices, 256 grains, 512 sounding).
+  (32768 notes, 256 markers, 128 slices, 16 voices, 256 grains, 512 sounding,
+  256 queued note-ons, 128-byte phrase names). The gmem mailbox needs about
+  164k slots for a full phrase.
 
 ## Adding or changing a parameter
 
@@ -166,21 +253,37 @@ Confirmed working in REAPER 7 on macOS:
 
 - it compiles, and `import <name>.jsfx-inc` resolves from the plug-in's own
   folder with all four files side by side in `Effects/Midular/`
-- all 55 parameters parse with the right defaults and enum labels
+- all 55 parameters parse with the right defaults and enum labels (`slider57`,
+  Import Ticket, has been added since)
 - the file slider finds `Data/midular/default.txt`
 - the `@gfx` panel renders once the sliders are hidden
 - idle cost is negligible (0.03% CPU)
 
 Still unverified, in rough order of likelihood:
 
-1. The file-list enumeration in `md_scan_files()`, which steps `slider1` and
+1. **The gmem import, end to end.** The script's API calls are verified (see
+   above); what the reference cannot say is how the JSFX side behaves:
+   - The hidden slider's parameter name reads back as `Import Ticket` (the
+     script also accepts `-Import Ticket`).
+   - `TrackFX_SetParam` on a JSFX slider takes the slider's own units. The
+     script reads the value back and retries with `TrackFX_SetParamNormalized`
+     if not, so either way should work.
+   - `@slider` runs on `TrackFX_SetParam` even with the transport stopped, and
+     `gmem[]` is usable there. If not, the import still lands on the next
+     `@block`; the script then reports that it is waiting.
+   - `options:` accepts `gmem=Midular` alongside `no_meter gfx_hz=30`.
+   - A phrase of thousands of notes in `@serialize`: project size, load time,
+     and whether REAPER stores the values at full precision.
+   - Undo/redo of an import, and that opening the project elsewhere plays the
+     stored phrase whatever `Data/midular/` holds.
+2. The file-list enumeration in `md_scan_files()`, which steps `slider1` and
    reads back `strcpy_fromslider` to discover the available phrases. `slider1`
-   stays visible until this is confirmed, so there is always a way to pick a
-   phrase.
-2. Exact text-mode `file_avail()` behaviour at EOF (mitigated as described above)
-3. `sliderchange()` / `slider_automate()` masks for sliders above 32, where the
+   stays visible until this and item 1 are confirmed, so there is always a way
+   to pick a phrase.
+3. Exact text-mode `file_avail()` behaviour at EOF (mitigated as described above)
+4. `sliderchange()` / `slider_automate()` masks for sliders above 32, where the
    bitmask exceeds 32 bits
-4. Whether the engine actually sounds right — it was parked before playing
+5. Whether the engine actually sounds right — it was parked before playing
    through it in anger. The harness proves the note output is what the design
    intends; it says nothing about whether the design is musical.
 
@@ -197,30 +300,33 @@ custom GUI" has *two* possible causes — a compile error, or visible sliders
 pushing the `@gfx` canvas below the fold (see the `-` prefix note above). If
 there is no error message, it is the second one.
 
-## Agreed next steps (not yet implemented)
+## Agreed next steps
 
-Discussed and chosen over rewriting as VST3/CLAP:
+From an October 2026 review:
 
-1. **Serialize the phrase itself**, not just the markers, so projects are
-   self-contained and don't depend on a file in `Data/midular/` on whatever
-   machine opens them.
-2. **Have `midular_import.lua` select the phrase it just wrote** in the focused
-   Midular instance. The API reference confirms this is possible and shows a
-   better route than the one first sketched:
+1. ~~Fix the defaults and the bugs the review found.~~ Done — see the
+   invariants above and the `factory settings`, `randomness`, `timing` and
+   `phrases and markers` tests.
+2. ~~Import through `gmem` and save the phrase in the project.~~ Done in the
+   code and tests; still to confirm in REAPER (item 1 above). Once it is, the
+   `.txt` route can shrink: hide `slider1`, drop `md_scan_files` and the file
+   button, and make the importer's file fallback an explicit "export" action.
+   Useful findings from the API reference that still apply:
 
    - `TrackFX_SetNamedConfigParm`'s `FILE` / `FILEx` values are **RS5k only** —
      there is no named-config route to a JSFX file slider. Don't go looking.
-   - The file slider is parameter index 0, so `TrackFX_SetParam(tr, fx, 0, n)`
-     sets it and `TrackFX_GetParam` gives the min/max (i.e. how many phrases
-     REAPER found).
-   - Don't guess `n` from alphabetical order. `TrackFX_GetFormattedParamValue(tr,
-     fx, 0)` renders a file slider as its **filename**, so step the parameter and
-     match the name that was just written. That is ordering-agnostic and doubles
-     as a live check of note 2 under *Unverified in REAPER*.
    - Find the instance with `GetTouchedOrFocusedFX(1)` (`GetFocusedFX` is
-     deprecated), then confirm with `TrackFX_GetFXName` before touching
-     anything; fall back to scanning `CountTracks`/`TrackFX_GetCount` when no
-     Midular window is focused.
+     deprecated; the script falls back to it only on builds without the new
+     call), then confirm it before touching anything — the script does that by
+     requiring the Import Ticket parameter, which survives renaming.
+   - `TrackFX_GetFormattedParamValue` renders a file slider as its
+     **filename** — match on that, never on alphabetical order, if a script
+     ever has to drive `slider1`.
+
+3. **Rework grains.** A grain currently fires only the notes whose *start*
+   falls inside its window, at their full source length. So a grain over a held
+   chord is silent, and short grains don't shorten anything. A grain should play
+   every note that *overlaps* its window, clipped to the grain's length.
 
 ## Conventions
 

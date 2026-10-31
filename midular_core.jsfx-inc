@@ -81,6 +81,7 @@ function md_init_consts()
   V_GBASE       = 21;         // first grain slot owned by this voice
   V_MODE        = 22;         // mode captured at trigger time
   V_SUSHOLD     = 23;         // note-off arrived while the sustain pedal was down
+  V_HOLD        = 24;         // 1 if note-off is ignored (one-shot, slice "until end")
 
   G_STRIDE      = 8;
   GRAINS        = 369000;
@@ -98,11 +99,49 @@ function md_init_consts()
   N_USED        = 3;
   SOUNDMAP      = 375000;     // 2048 entries: chan*128+pitch -> slot+1
 
+  // note-ons that fall in a later block (humanize can push a note past the end
+  // of the current one); fired by md_pend_flush() when their block comes round
+  MAX_PEND      = 256;
+  P_STRIDE      = 6;
+  PEND          = 382000;     // [time, chan, pitch, vel, dur, owner]
+
   MAX_CTLS      = 224;
   C_STRIDE      = 16;
   CTLS          = 378000;
 
   SCRATCH       = 390000;     // MAX_NOTES scratch for sorting keys
+
+  // ---- phrase blocks ------------------------------------------------------
+  // A phrase travels as a "phrase block": the same layout in gmem (from the
+  // importer), in STAGE (waiting for @block to install it) and in CURHDR (the
+  // header of the phrase now playing, whose notes live in BUF_NOTES).
+  // scripts/midular_import.lua mirrors these offsets - change both together.
+  PB_N          = 8;          // note count
+  PB_LEN        = 9;          // length in beats
+  PB_TEMPO      = 10;
+  PB_TSNUM      = 11;
+  PB_TSDEN      = 12;
+  PB_NMARK      = 13;         // marker count
+  PB_NAMELEN    = 14;         // name length in bytes
+  PB_MARK       = 64;         // MAX_MARKERS marker positions
+  PB_NAME       = 320;        // NAME_MAX character codes
+  PB_NOTES      = 512;        // note records, NOTE_STRIDE each
+  NAME_MAX      = 128;
+
+  CURHDR        = 384000;     // .. 384512; markers as the phrase carried them:
+  MARKERS_OG    = CURHDR + PB_MARK;
+  STAGE         = 430000;     // .. 594352
+
+  // ---- gmem mailbox (options:gmem=Midular) ---------------------------------
+  // The importer writes a phrase block, sets G_STATE to 2 and puts G_TICKET on
+  // one instance's Import Ticket slider.  That instance - and only that one -
+  // copies it, sets G_STATE to 3 and echoes the ticket in G_ACK.
+  G_MAGIC       = 0;          // MD_MAGIC when the mailbox holds a phrase
+  G_PROTO       = 1;          // mailbox layout version, GM_PROTO
+  G_STATE       = 2;          // 0 idle, 1 being written, 2 ready, 3 taken
+  G_TICKET      = 3;
+  G_ACK         = 4;
+  GM_PROTO      = 1;
 
   md_rng        = 12345;
 );
@@ -113,10 +152,17 @@ function md_init_consts()
 function md_clamp(x, lo, hi) ( x < lo ? lo : (x > hi ? hi : x) );
 
 // Park-Miller LCG whose state lives in memory so every voice/grain can own one.
+//
+// The modulo is done in floating point on purpose.  EEL2's % truncates its
+// operands to (at most) 32-bit integers, but state * 16807 needs ~46 bits, so
+// `%` collapses the generator into a 3-value cycle.  Every intermediate here is
+// an integer below 2^53, so the double arithmetic is exact.
+function md_wrap_int(x, m) ( x - floor(x / m) * m );
+
 function md_rndm(p)
 (
-  p[0] < 1 ? p[0] = 1;
-  p[0] = (p[0] * 16807) % 2147483647;
+  (p[0] < 1 || p[0] >= 2147483647) ? p[0] = 1 + md_wrap_int(floor(abs(p[0])), 2147483646);
+  p[0] = md_wrap_int(p[0] * 16807, 2147483647);
   p[0] * 0.0000000004656612875;
 );
 
@@ -199,7 +245,8 @@ function md_add_note(st, ln, pit, vel, chan) local(np)
 function md_make_default() local(i, p)
 (
   md_src_n = 0;
-  md_nmark = 0;
+  md_nmark_og = 0;
+  md_src_kind = 0;
   md_src_len = 4;
   md_src_tempo = 120;
   md_src_tsnum = 4;
@@ -213,6 +260,18 @@ function md_make_default() local(i, p)
     i += 1;
   );
   md_build_order();
+);
+
+// Fallback for a missing or bogus length: the last note end, rounded up.
+function md_len_from_notes() local(i)
+(
+  md_src_len = 0;
+  i = 0;
+  while (i < md_src_n) (
+    md_src_len = max(md_src_len, BUF_NOTES[i * NOTE_STRIDE] + BUF_NOTES[i * NOTE_STRIDE + 1]);
+    i += 1;
+  );
+  md_src_len = max(ceil(md_src_len), 1);
 );
 
 function md_rd(h)
@@ -230,7 +289,7 @@ function md_load_handle(h)
     ver   = md_rd(h);
     (md_rd_ok && magic == MD_MAGIC && ver >= 1 && ver <= MD_FMT_VER) ? (
       md_src_n     = 0;
-      md_nmark     = 0;
+      md_nmark_og  = 0;
       md_src_len   = md_rd(h);
       cnt          = md_rd(h) | 0;
       md_src_tempo = md_rd(h);
@@ -259,25 +318,131 @@ function md_load_handle(h)
       i = 0;
       while (i < nmark && md_rd_ok) (
         st = md_rd(h);
-        md_rd_ok ? ( MARKERS[md_nmark] = st; md_nmark += 1; );
+        md_rd_ok ? ( MARKERS_OG[md_nmark_og] = st; md_nmark_og += 1; );
         i += 1;
       );
 
-      // Fall back to the last note end if the header length is bogus.
-      md_src_len <= 0 ? (
-        md_src_len = 0;
-        i = 0;
-        while (i < md_src_n) (
-          md_src_len = max(md_src_len, BUF_NOTES[i * NOTE_STRIDE] + BUF_NOTES[i * NOTE_STRIDE + 1]);
-          i += 1;
-        );
-        md_src_len = max(ceil(md_src_len), 1);
-      );
-
+      md_src_len <= 0 ? md_len_from_notes();
       md_src_n > 0 ? ( md_build_order(); ok = 1; );
     );
   );
   ok;
+);
+
+// ---------------------------------------------------------------------------
+// Phrase blocks: the importer's mailbox, the project copy, and installing them
+// ---------------------------------------------------------------------------
+
+// Mirror the phrase now playing into CURHDR (BUF_NOTES already holds its
+// notes), so @serialize can write it the same way whichever source it came from.
+function md_sync_cur() local(i, n)
+(
+  CURHDR[PB_N]     = md_src_n;
+  CURHDR[PB_LEN]   = md_src_len;
+  CURHDR[PB_TEMPO] = md_src_tempo;
+  CURHDR[PB_TSNUM] = md_src_tsnum;
+  CURHDR[PB_TSDEN] = md_src_tsden;
+  CURHDR[PB_NMARK] = md_nmark_og;
+  n = min(strlen(#md_name), NAME_MAX);
+  CURHDR[PB_NAMELEN] = n;
+  i = 0;
+  while (i < n) ( CURHDR[PB_NAME + i] = str_getchar(#md_name, i); i += 1; );
+);
+
+// Keep a phrase block's counts inside the buffers they index.
+function md_pb_clamp(pb)
+(
+  pb[PB_N]       = md_clamp(pb[PB_N] | 0, 0, MAX_NOTES);
+  pb[PB_NMARK]   = md_clamp(pb[PB_NMARK] | 0, 0, MAX_MARKERS);
+  pb[PB_NAMELEN] = md_clamp(pb[PB_NAMELEN] | 0, 0, NAME_MAX);
+);
+
+// Install the phrase waiting in STAGE as the playing phrase.  Called from
+// @block only: the audio thread is the one reading BUF_NOTES.
+function md_install_stage() local(n, i, sp, ok)
+(
+  ok = 0;
+  md_pb_clamp(STAGE);
+  n = STAGE[PB_N];
+  n > 0 ? (
+    md_src_n = 0;
+    i = 0;
+    while (i < n) (
+      sp = STAGE + PB_NOTES + i * NOTE_STRIDE;
+      md_add_note(sp[0], sp[1], sp[2], sp[3], sp[4]);
+      i += 1;
+    );
+    md_src_len   = STAGE[PB_LEN];
+    md_src_tempo = STAGE[PB_TEMPO] > 0 ? STAGE[PB_TEMPO] : 120;
+    md_src_tsnum = STAGE[PB_TSNUM] > 0 ? STAGE[PB_TSNUM] : 4;
+    md_src_tsden = STAGE[PB_TSDEN] > 0 ? STAGE[PB_TSDEN] : 4;
+    md_src_len <= 0 ? md_len_from_notes();
+
+    md_nmark_og = STAGE[PB_NMARK];
+    md_nmark_og > 0 ? memcpy(MARKERS_OG, STAGE + PB_MARK, md_nmark_og);
+
+    strcpy(#md_name, "");
+    i = 0;
+    while (i < STAGE[PB_NAMELEN]) ( str_setchar(#md_name, i, STAGE[PB_NAME + i]); i += 1; );
+    strlen(#md_name) < 1 ? strcpy(#md_name, "(imported phrase)");
+
+    md_build_order();
+    md_src_kind = 2;
+    md_sync_cur();
+    ok = 1;
+  );
+  ok;
+);
+
+// Live markers: the user's edits if there are any, else the phrase's own.
+function md_apply_markers()
+(
+  md_mark_edited ? (
+    md_nmark = md_clamp(md_ser_nmark | 0, 0, MAX_MARKERS);
+    md_nmark > 0 ? memcpy(MARKERS, MARKERS_SV, md_nmark);
+  ) : (
+    md_nmark = md_nmark_og;
+    md_nmark > 0 ? memcpy(MARKERS, MARKERS_OG, md_nmark);
+  );
+);
+
+// Check the Import Ticket slider.  A new value is a request from the importer:
+// if the gmem mailbox holds a ready phrase addressed with that ticket, copy it
+// to STAGE for @block to install, and acknowledge.  Runs from both @slider
+// (which fires on TrackFX_SetParam even with no audio running) and @block.
+function md_ticket_poll(t) local(n, i, e)
+(
+  t != md_ticket_seen ? (
+    md_ticket_seen = t;
+    (t > 0 && gmem[G_MAGIC] == MD_MAGIC && gmem[G_PROTO] == GM_PROTO &&
+     gmem[G_STATE] == 2 && gmem[G_TICKET] == t) ? (
+      i = PB_N;
+      while (i < PB_MARK) ( STAGE[i] = gmem[i]; i += 1; );
+      md_pb_clamp(STAGE);
+      n = STAGE[PB_NMARK];
+      i = 0; while (i < n) ( STAGE[PB_MARK + i] = gmem[PB_MARK + i]; i += 1; );
+      n = STAGE[PB_NAMELEN];
+      i = 0; while (i < n) ( STAGE[PB_NAME + i] = gmem[PB_NAME + i]; i += 1; );
+      e = PB_NOTES + STAGE[PB_N] * NOTE_STRIDE;
+      i = PB_NOTES; while (i < e) ( STAGE[i] = gmem[i]; i += 1; );
+
+      gmem[G_STATE] = 3;
+      gmem[G_ACK]   = t;
+      md_mark_edited = 0;        // a new phrase: edits to the old markers go
+      md_stage_ready = 1;
+    );
+  );
+);
+
+// @serialize helper: reads or writes one phrase block (header, markers, name,
+// notes) - file_mem works in both directions.
+function md_ser_block(pb, notes, reading)
+(
+  file_mem(0, pb + PB_N, 7);
+  reading ? md_pb_clamp(pb);
+  pb[PB_NMARK]   > 0 ? file_mem(0, pb + PB_MARK, pb[PB_NMARK]);
+  pb[PB_NAMELEN] > 0 ? file_mem(0, pb + PB_NAME, pb[PB_NAMELEN]);
+  pb[PB_N]       > 0 ? file_mem(0, notes, pb[PB_N] * NOTE_STRIDE);
 );
 
 // ---------------------------------------------------------------------------

@@ -333,3 +333,18 @@ From an October 2026 review:
 - GPL v3; every source file carries a short header comment.
 - Comments explain *why* — particularly where a JSFX constraint forced the shape
   of the code. Don't strip those; they are the map back to this file.
+- **Text on screen follows Apple's writing guidelines** (the house rule from
+  Noterator's decision 0053; see `docs/sessions/2026-10-14-apple-writing.md`):
+  knob labels, tabs and slider names in title style ("Velocity Scale",
+  "Warp and Loop"), no abbreviations where the word fits ("semitones", not
+  "st"), status and hint lines in sentence case with " · " between fragments,
+  messages that say what happened and then what to do, curly apostrophes,
+  "Command-click" spelled out in hints (ysfx's font has no ⌘ glyph and REAPER's
+  Arial may not either). The ` · ` and `×` characters are UTF-8 in the source;
+  keep the files UTF-8. Select boxes keep their short option names ("Free",
+  "Rate", "Ignore") because the box is 106 px wide; the slider enum lists, shown
+  in REAPER's own parameter list, carry the full names. Renaming a slider's
+  description or enum label is safe (REAPER stores values by number); never
+  renumber, reorder or re-range a slider. Render the window to check a longer
+  label fits: Reverberator's `tools/build/gui` (ysfx) loads `Midular.jsfx`
+  as is.

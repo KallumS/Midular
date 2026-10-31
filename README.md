@@ -49,22 +49,8 @@ reads them and hands the notes to the plug-in:
   parses it (format 0 and 1, running status, tempo and time-signature meta
   events, SMPTE or ticks-per-quarter division, marker meta events).
 
-The phrase goes straight into Midular — no dialog, the plug-in just switches to
-it. Which Midular gets it:
-
-1. the one whose window is open, else
-2. the only one on the selected tracks, else
-3. the only one in the project.
-
-With several and none of those deciding, the script asks you to open the one you
-want. The phrase is **saved in the project**, so the project plays the same on
-any machine and needs no extra files; the header shows it as *IN PROJECT*.
-
-**Fallback:** with no Midular in the project, the script saves the phrase as a
-`.txt` file in `<resource>/Data/midular/` (format in
-[docs/FORMAT.md](docs/FORMAT.md)) instead, for the **Source File** selector.
-Picking a file there replaces the current phrase, and it too is then saved in
-the project.
+Either way you are asked for a name, and the result lands in
+`<resource>/Data/midular/`. Click the file name at the top of Midular's window to pick it up.
 
 ## Modes
 
@@ -86,7 +72,7 @@ Five ways to decide where the cuts go:
 * **Pitch Changes** — a new slice whenever the leading (highest) pitch of an
   onset group changes.
 * **Manual Markers** — markers carried in from the import, plus any you place in
-  the editor. **Ctrl-click** the piano roll to add one, **right-click** to remove
+  the editor. **Command-click** the piano roll to add one, **right-click** to remove
   the nearest. Edited markers are saved with the project.
 
 ### Granular
@@ -106,12 +92,12 @@ Grains fade in and out with a raised-cosine velocity window.
 **Note filter.** A filter that removes notes instead of frequencies. *Cutoff* is
 a note number; *Slope* is how many semitones it takes to fade from full to
 silent past the corner; *Width* sets the band for bandpass/notch; *Resonance*
-emphasises notes sitting at the corner; *Key Track* moves the cutoff with the
+emphasises notes sitting at the corner; *Key Tracking* moves the cutoff with the
 played key. Anything whose weight falls below *Threshold* is dropped outright —
 the rest just lose velocity. Filtered-out notes are drawn greyed in the roll.
 
 **Amp envelope.** A standard ADSR sampled at each note-on and applied to
-velocity, with a *Curve* control that bends it and an *Amount* that blends it
+velocity, with an *Envelope Curve* control that bends it and an *Envelope Amount* that blends it
 against the untouched velocity. Releasing a key plays the phrase out through the
 release stage rather than cutting it off.
 
@@ -135,10 +121,10 @@ phrase — the last note plays first and note lengths are preserved.
 
 The piano roll shows the loaded phrase with the region shaded, loop bounds in
 amber, slice boundaries and their numbers in green, markers in violet, and a
-live playhead for every sounding voice or grain. The five tabs below hold the
-controls.
+live playhead for every sounding voice or grain. The five tabs below — Play,
+Warp and Loop, Amp and Filter, Slice and Granular — hold the controls.
 
-* Drag a knob vertically; hold **ctrl/cmd** for fine adjustment.
+* Drag a knob vertically; hold **Command** (Ctrl on Windows) for fine adjustment.
 * **Double-click** a knob to reset it to its default.
 * The mouse wheel nudges whatever is under the pointer.
 * Click the phrase name in the header to pick a `.txt` phrase from `Data/midular/`.

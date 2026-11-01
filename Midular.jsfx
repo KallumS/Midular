@@ -267,15 +267,15 @@ function md_build_ui()
   md_ctl_cell(CT_SELECT, 45, 0,   0, 1,   1, 5, 0, 4, "Gate",        "Until Slice End|While Held");
 
   // ---- page 5: GRANULAR ----------------------------------------------------
-  md_ctl_cell(CT_KNOB,   46, 16,  1, 256, 1, 0, 0, 5, "Grains",      "%d");
-  md_ctl_cell(CT_KNOB,   47, 0.25, 0.01, 8, 0.001, 1, 0, 5, "Size",  "%.3f beats");
-  md_ctl_cell(CT_KNOB,   48, 0,   0, 100, 0.1, 2, 0, 5, "Spray",     "%.1f %%");
+  md_ctl_cell(CT_KNOB,   46, 4,   1, 256, 1, 0, 0, 5, "Grains",      "%d");
+  md_ctl_cell(CT_KNOB,   47, 1, 0.01, 8, 0.001, 1, 0, 5, "Size",  "%.3f beats");
+  md_ctl_cell(CT_KNOB,   48, 20,  0, 100, 0.1, 2, 0, 5, "Spray",     "%.1f %%");
   md_ctl_cell(CT_KNOB,   49, 0,  -4, 4, 0.001, 3, 0, 5, "Motion",    "%+.3f");
   md_ctl_cell(CT_SELECT, 50, 0,   0, 3,   1, 4, 0, 5, "Direction",   "Forward|Reverse|Alternate|Random");
   md_ctl_cell(CT_KNOB,   51, 100, 1, 100, 1, 5, 0, 5, "Density",     "%d %%");
   md_ctl_cell(CT_KNOB,   52, 0,   0, 24,  1, 6, 0, 5, "Pitch Spread","%d semitones");
 
-  md_ctl_cell(CT_SELECT, 53, 0,   0, 2,   1, 0, 1, 5, "Spread",      "Even|Random|Cloud");
+  md_ctl_cell(CT_SELECT, 53, 2,   0, 2,   1, 0, 1, 5, "Spread",      "Even|Random|Cloud");
   md_ctl_cell(CT_KNOB,   54, 1,   1, 999, 1, 1, 1, 5, "Seed",        "%d");
 );
 

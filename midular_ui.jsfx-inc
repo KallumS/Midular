@@ -344,7 +344,7 @@ function md_draw_header() local(x, w)
   md_txt(x + 8, 10, w - 96, 18, #md_name, 4);
   md_src_kind == 2 ? (
     gfx_set(0.45, 0.90, 0.62, 0.9);
-    md_txt(x + w - 88, 10, 80, 18, "IN PROJECT", 2 | 4);
+    md_txt(x + w - 88, 10, 80, 18, "In Project", 2 | 4);
   );
 
   gfx_set(0.50, 0.54, 0.62, 1);

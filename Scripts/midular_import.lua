@@ -386,38 +386,188 @@ local function ticket_param(track, fx)
   return nil
 end
 
-  if #items > 0 then
-    ph = phrase_from_items(items)
-  else
-    local ok, path = reaper.GetUserFileNameForRead("", "Choose a MIDI File to Import into Midular", ".mid")
-    if not ok then return end
-    local f = io.open(path, "rb")
-    if not f then msg("“" .. path .. "” couldn’t be opened.\n\nCheck that the file is still there, then try again.") return end
-    local data = f:read("*a")
-    f:close()
-    local err
-    ph, err = parse_smf(data)
-    if not ph then msg("“" .. path .. "” couldn’t be read. " .. tostring(err) .. "\n\nChoose a .mid file saved from REAPER or another MIDI program.") return end
-    ph.name = path:match("([^/\\]+)%.[Mm][Ii][Dd][Ii]?$") or path:match("([^/\\]+)$") or "phrase"
+local function track_label(track)
+  if track == reaper.GetMasterTrack(0) then return "the master track" end
+  local _, name = reaper.GetTrackName(track)
+  return string.format("track %d (%s)",
+    math.floor(reaper.GetMediaTrackInfo_Value(track, "IP_TRACKNUMBER")), name)
+end
+
+-- The Midular whose window is open, if any.
+local function focused_target()
+  local track, fx
+  if reaper.GetTouchedOrFocusedFX then
+    local ok, trackidx, itemidx, _, fxidx = reaper.GetTouchedOrFocusedFX(1)
+    if not ok or itemidx ~= -1 then return nil end          -- take FX: not ours
+    track = trackidx == -1 and reaper.GetMasterTrack(0) or reaper.GetTrack(0, trackidx)
+    fx = fxidx
+  elseif reaper.GetFocusedFX then                          -- REAPER before 7.0
+    local kind, tracknum, _, fxnum = reaper.GetFocusedFX()
+    if kind ~= 1 then return nil end
+    track = tracknum == 0 and reaper.GetMasterTrack(0) or reaper.GetTrack(0, tracknum - 1)
+    fx = fxnum
   end
   if not track then return nil end
   local p = ticket_param(track, fx)
   return p and { track = track, fx = fx, param = p } or nil
 end
 
-  if #ph.notes == 0 then msg("There are no notes to import.\n\nSelect a MIDI item with notes in it, or select nothing to choose a MIDI file.") return end
+local function all_targets(tracks)
+  local found = {}
+  for _, track in ipairs(tracks) do
+    for fx = 0, reaper.TrackFX_GetCount(track) - 1 do
+      local p = ticket_param(track, fx)
+      if p then found[#found + 1] = { track = track, fx = fx, param = p } end
+    end
+  end
+  return found
+end
 
+-- Returns a target, or nil plus "none" / "several".
+local function find_target()
+  local t = focused_target()
+  if t then return t end
+
+  local sel = {}
+  for i = 0, reaper.CountSelectedTracks(0) - 1 do sel[#sel + 1] = reaper.GetSelectedTrack(0, i) end
+  local onsel = all_targets(sel)
+  if #onsel == 1 then return onsel[1] end
+
+  local every = { reaper.GetMasterTrack(0) }
+  for i = 0, reaper.CountTracks(0) - 1 do every[#every + 1] = reaper.GetTrack(0, i) end
+  local all = all_targets(every)
+  if #all == 1 then return all[1] end
+  return nil, (#all == 0) and "none" or "several"
+end
+
+-- ---------------------------------------------------------------------------
+-- the gmem hand-over
+-- ---------------------------------------------------------------------------
+-- Writes the phrase into the mailbox and marks it ready.  Returns the ticket
+-- that addresses it.
+local function write_gmem(ph)
+  reaper.gmem_attach(GMEM_NAME)
+  local w = reaper.gmem_write
+  local ticket = math.floor(reaper.gmem_read(G.TICKET)) % (TICKET_MAX - 1) + 1
+
+  w(G.STATE, ST_WRITING)                    -- nobody may take a half-written phrase
+  local nn = math.min(#ph.notes, MAX_NOTES)
+  local nm = math.min(#ph.markers, MAX_MARKERS)
+  local name = ph.name:sub(1, NAME_MAX)
+  w(G.N, nn); w(G.LEN, ph.length); w(G.TEMPO, ph.tempo)
+  w(G.TSNUM, ph.tsnum); w(G.TSDEN, ph.tsden)
+  w(G.NMARK, nm); w(G.NAMELEN, #name)
+  for i = 1, nm do w(G.MARK + i - 1, ph.markers[i]) end
+  for i = 1, #name do w(G.NAME + i - 1, name:byte(i)) end
+  local base = G.NOTES
+  for i = 1, nn do
+    local n = ph.notes[i]
+    w(base, n[1]); w(base + 1, n[2]); w(base + 2, n[3]); w(base + 3, n[4]); w(base + 4, n[5])
+    base = base + 5
+  end
+  w(G.ACK, 0)
+  w(G.TICKET, ticket)
+  w(G.PROTO, GM_PROTO)
+  w(G.MAGIC, MAGIC)
+  w(G.STATE, ST_READY)                      -- last: the phrase is complete
+  return ticket
+end
+
+-- Puts the ticket on the target's Import Ticket parameter, which is what tells
+-- that one instance to take the phrase.
+local function send_ticket(t, ticket)
+  reaper.TrackFX_SetParam(t.track, t.fx, t.param, ticket)
+  -- TrackFX_SetParam should take the slider's own units; if this build
+  -- normalises instead, the value read back will not match - retry that way.
+  local v = reaper.TrackFX_GetParam(t.track, t.fx, t.param)
+  if math.abs((v or 0) - ticket) > 0.5 then
+    reaper.TrackFX_SetParamNormalized(t.track, t.fx, t.param, ticket / TICKET_MAX)
+  end
+end
+
+local function wait_for_ack(ticket, on_done)
+  local t0 = reaper.time_precise()
+  local function poll()
+    if reaper.gmem_read(G.ACK) == ticket then return on_done(true) end
+    if reaper.time_precise() - t0 > ACK_TIMEOUT then return on_done(false) end
+    reaper.defer(poll)
+  end
+  poll()
+end
+
+-- ---------------------------------------------------------------------------
+-- main
+-- ---------------------------------------------------------------------------
+local function read_source()
+  local items = collect_items()
+  if #items > 0 then return phrase_from_items(items) end
+
+  local ok, path = reaper.GetUserFileNameForRead("", "Choose a MIDI File to Import into Midular", ".mid")
+  if not ok then return nil end
+  local f = io.open(path, "rb")
+  if not f then msg("“" .. path .. "” couldn’t be opened.\n\nCheck that the file is still there, then try again.") return nil end
+  local data = f:read("*a")
+  f:close()
+  local ph, err = parse_smf(data)
+  if not ph then msg("“" .. path .. "” couldn’t be read. " .. tostring(err) .. "\n\nChoose a .mid file saved from REAPER or another MIDI program.") return nil end
+  ph.name = path:match("([^/\\]+)%.[Mm][Ii][Dd][Ii]?$") or path:match("([^/\\]+)$") or "phrase"
+  return ph
+end
+
+-- Fallback: no Midular to send to, so write a .txt for the Source File selector.
+local function save_as_file(ph, why)
   local ok, name = reaper.GetUserInputs("Midular Import", 1, "Name (saved in Data/midular),extrawidth=140", ph.name)
   if not ok then return end
   local path = out_dir() .. "/" .. sanitize(name)
   local wrote, werr = write_phrase(ph, path)
   if not wrote then msg("“" .. path .. "” couldn’t be saved.\n\n" .. tostring(werr) .. "\n\nCheck that REAPER’s Data folder can be written to, then try again.") return end
-
   msg(string.format(
-    "Imported %d notes (%.2f beats, %d markers) at %.1f BPM in %d/%d.\n\n%s\n\n" ..
+    "%s\n\nSaved %d notes (%.2f beats, %d markers) at %.1f BPM in %d/%d to\n%s\n\n" ..
     "To use it, click the file name at the top of Midular’s window and choose it.",
-    #ph.notes, ph.length, #ph.markers, ph.tempo, ph.tsnum, ph.tsden, path))
+    why, #ph.notes, ph.length, #ph.markers, ph.tempo, ph.tsnum, ph.tsden, path))
+end
+
+local function main()
+  local ph = read_source()
+  if not ph then return end
+  if #ph.notes == 0 then msg("There are no notes to import.\n\nSelect a MIDI item with notes in it, or select nothing to choose a MIDI file.") return end
+
+  local target, why = find_target()
+  if not target then
+    if why == "several" then
+      msg("There’s more than one Midular in this project.\n\n" ..
+          "Open the window of the one you want, or select its track, then run this again.")
+    else
+      save_as_file(ph, "There’s no Midular in this project to load the phrase into, so it was saved as a file.")
+    end
+    return
+  end
+
+  local ticket = write_gmem(ph)
+  reaper.Undo_BeginBlock()
+  send_ticket(target, ticket)
+  reaper.Undo_EndBlock("Import Phrase into Midular", -1)
+
+  -- Success needs no dialog: the plug-in shows the new phrase.  Only say
+  -- something if it has not picked the phrase up.
+  wait_for_ack(ticket, function(ok)
+    if not ok then
+      msg("The phrase is waiting for Midular on " .. track_label(target.track) .. ", " ..
+          "but the plug-in hasn’t picked it up yet.\n\n" ..
+          "It will as soon as the plug-in runs. Check that it isn’t offline or bypassed, " ..
+          "and that the audio device is running.")
+    end
+  end)
+end
+
+-- tests load this file as a library (tests/test_import.lua)
+if MIDULAR_IMPORT_LIB then
+  return {
+    parse_smf = parse_smf, write_phrase = write_phrase, sanitize = sanitize,
+    finish = finish, new_phrase = new_phrase, add_note = add_note,
+    write_gmem = write_gmem, send_ticket = send_ticket, find_target = find_target,
+    G = G, GM_PROTO = GM_PROTO,
+  }
 end
 
 main()
-reaper.Undo_EndBlock("Import MIDI Source into Midular", -1)

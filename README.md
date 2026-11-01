@@ -49,8 +49,22 @@ reads them and hands the notes to the plug-in:
   parses it (format 0 and 1, running status, tempo and time-signature meta
   events, SMPTE or ticks-per-quarter division, marker meta events).
 
-Either way you are asked for a name, and the result lands in
-`<resource>/Data/midular/`. Click the file name at the top of Midular's window to pick it up.
+The phrase goes straight into Midular — no dialog, the plug-in just switches to
+it. Which Midular gets it:
+
+1. the one whose window is open, else
+2. the only one on the selected tracks, else
+3. the only one in the project.
+
+With several and none of those deciding, the script asks you to open the one you
+want. The phrase is **saved in the project**, so the project plays the same on
+any machine and needs no extra files; the header shows it as *In Project*.
+
+**Fallback:** with no Midular in the project, the script saves the phrase as a
+`.txt` file in `<resource>/Data/midular/` (format in
+[docs/FORMAT.md](docs/FORMAT.md)) instead, for the **Source File** selector.
+Picking a file there replaces the current phrase, and it too is then saved in
+the project.
 
 ## Modes
 

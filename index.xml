@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  ReaPack index for Midular.
+
+  Add this repository in REAPER with Extensions > ReaPack > Import repositories,
+  pasting the raw URL of this file on the default branch:
+
+    https://raw.githubusercontent.com/KallumS/Midular/main/index.xml
+
+  That URL only resolves once this file is on the default branch.
+
+  Each <source> is pinned to a commit rather than a branch, so an installed
+  version is the exact set of files that was tested and cannot change
+  underneath anyone. Publishing a new version means adding a <version> block
+  with a fresh commit hash - never editing an existing one.
+
+  Two packages: the JSFX with the three files it imports by name, and the
+  import script. They talk through shared memory, so they need not share a
+  folder.
+
+  ReaPack keys an installed package by its NAME, so renaming a file is not an
+  upgrade. Rename sparingly.
+-->
+<index version="1" name="Midular">
+  <category name="MIDI">
+
+    <reapack name="Midular.jsfx" type="effect" desc="Midular">
+      <version name="1.0" author="kallums" time="2026-11-01T11:41:52Z">
+        <changelog><![CDATA[First release through ReaPack. A MIDI sampler: load a MIDI phrase, map it across the keyboard and shape it with a note filter, an envelope, warping and looping, in classic, one-shot, slice or granular mode.]]></changelog>
+        <source main="main">https://raw.githubusercontent.com/KallumS/Midular/1ff2c3cb35a529d6c2c482307512657611a1b8db/Midular.jsfx</source>
+        <source file="midular_core.jsfx-inc">https://raw.githubusercontent.com/KallumS/Midular/1ff2c3cb35a529d6c2c482307512657611a1b8db/midular_core.jsfx-inc</source>
+        <source file="midular_engine.jsfx-inc">https://raw.githubusercontent.com/KallumS/Midular/1ff2c3cb35a529d6c2c482307512657611a1b8db/midular_engine.jsfx-inc</source>
+        <source file="midular_ui.jsfx-inc">https://raw.githubusercontent.com/KallumS/Midular/1ff2c3cb35a529d6c2c482307512657611a1b8db/midular_ui.jsfx-inc</source>
+      </version>
+      <metadata>
+        <description><![CDATA[{\pard Midular\par
+A MIDI sampler. Load a MIDI phrase, map it across the keyboard, and shape it with a filter, an envelope, warping and looping - every stage works on notes, not audio.\par
+Put an instrument after it: it emits MIDI. Use the Midular Import script to load a phrase from MIDI items or a MIDI file.\par
+}]]></description>
+        <link rel="website">https://github.com/KallumS/Midular</link>
+      </metadata>
+    </reapack>
+
+    <reapack name="midular_import.lua" type="script" desc="Midular - Import MIDI">
+      <version name="1.0" author="kallums" time="2026-11-01T11:41:52Z">
+        <changelog><![CDATA[First release through ReaPack. Imports MIDI into Midular: run it with MIDI items selected to capture them, or with nothing selected to pick a MIDI file. The phrase goes straight into the open Midular.]]></changelog>
+        <source main="main" file="midular_import.lua">https://raw.githubusercontent.com/KallumS/Midular/1ff2c3cb35a529d6c2c482307512657611a1b8db/Scripts/midular_import.lua</source>
+      </version>
+      <metadata>
+        <description><![CDATA[{\pard Midular - Import MIDI\par
+Imports MIDI into Midular.\par
+Run it with one or more MIDI items selected to capture them, or with nothing selected to pick a MIDI file from disk.\par
+}]]></description>
+        <link rel="website">https://github.com/KallumS/Midular</link>
+      </metadata>
+    </reapack>
+
+  </category>
+</index>

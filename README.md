@@ -16,6 +16,14 @@ MIDI in ──▶ trigger ──▶ [ mode engine ] ──▶ [ note filter ] �
 
 ## Install
 
+**With ReaPack** (easiest, and it keeps it up to date): Extensions ->
+ReaPack -> Import repositories, paste
+`https://raw.githubusercontent.com/KallumS/Midular/main/index.xml`,
+then Browse packages, find Midular and Install. Install both Midular and Midular - Import MIDI. That link only works
+once this has been merged into the main branch.
+
+**By hand:**
+
 1. Copy these four files into `<REAPER resource path>/Effects/Midular/`
    (Options → Show REAPER resource path):
 

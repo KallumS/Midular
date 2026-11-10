@@ -348,3 +348,16 @@ From an October 2026 review:
   renumber, reorder or re-range a slider. Render the window to check a longer
   label fits: Reverberator's `tools/build/gui` (ysfx) loads `Midular.jsfx`
   as is.
+
+## The Ableton device (branch `ableton`)
+
+`ableton/` is Midular as a Max for Live MIDI effect, for Live 12.1 or later (it runs on Max 9's JavaScript, in a `[v8ui]`). It is on this branch only: `ableton` is `main` with the device added, so REAPER work goes on `main` and is merged in (`git merge main`). `ableton/README.md` is the musician's guide to it.
+
+- **Build**: `python3 ableton/kit/build.py ableton/device.json` writes the `.amxd`, the `.maxpat` and the bundle `Midular.js`; with `--check` it fails if they are stale. Rebuild after any change to the code it carries, the kit or `device.json`, and commit what it writes: the user copies those files straight into Live.
+- **Test**: `node --test ableton/tests/test_device.js`, on a pretend Max and a pretend Live set (`ableton/kit/test/max.js`).
+- **Picture**: `node ableton/window.js` redraws `ableton/window.png` (a phrase loaded from a clip), the picture in both READMEs, from the device's own drawing code on that pretend Max; it needs Playwright's Chromium. Redraw it after any change to what the device shows, and look at it.
+- **The kit is shared.** `ableton/kit/` is the same in all eighteen family repositories with a device: change it in one, copy it to all, rebuild and test each. `ableton/kit/runtime/` is Middaw's `runtime/`, copied unchanged - fix Middaw, then copy. `ableton/kit/VENDORED.md` has the commits.
+- **Not yet opened in Live.** Everything is tested against stand-ins for Max and the Live Object Model; say so rather than claim it works in Live.
+- **The device runs `Midular.jsfx` and its `.jsfx-inc` files unchanged** on Middaw's EEL2 runtime, `@gfx` included (`ableton/kit/jsfx_device.js`, `gfx.js`): the window is the JSFX's own, on mgraphics. MIDI goes in and out on Max's JavaScript clock, every 4 ms, not on the audio thread. A JSFX feature the runtime lacks is a Middaw fix, then a copy.
+- `ableton/actions.js` is the importer's half: a clip's notes into the `Midular` gmem mailbox, then the ticket. It shares the bundle's scope with the device and writes the same slots the REAPER script does, so **a change to the protocol is a change in three places**: the JSFX, the REAPER script and `actions.js`.
+- The controls are the window's, not Live parameters, so they cannot be automated; they are saved with the set.

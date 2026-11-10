@@ -31,7 +31,7 @@ Everything Midular saves in REAPER (its @serialize, the phrase included) is save
 ableton/device.json` writes the `.amxd`, the `.maxpat` and the script bundle
 `Midular.js`. The bundle is Middaw's EEL2 runtime, `Midular.jsfx` and its includes from the repository root, the shared window (`ableton/kit/jsfx_device.js`, `gfx.js`) and `ableton/actions.js`, the importer's part. See `ableton/kit/VENDORED.md`.
 
-`node --test ableton/tests/test_device.js` runs the device on a pretend Max and Live: the window draws and answers clicks all over it, notes go through and end, Load Clip hands a clip over through the importer's mailbox and a key plays it back, and the state is saved and comes back. `node ableton/kit/test/shot.js ableton/Midular.js 920 600 out.png` draws the window.
+`node --test ableton/tests/test_device.js` runs the device on a pretend Max and Live: the window draws and answers clicks all over it, notes go through and end, Load Clip hands a clip over through the importer's mailbox and a key plays it back, and the state is saved and comes back. `node ableton/window.js` redraws the picture above from the device's own drawing code (it needs Playwright's Chromium).
 
 ## Limits
 

@@ -16,6 +16,8 @@ MIDI in ──▶ trigger ──▶ [ mode engine ] ──▶ [ note filter ] �
 
 **In Ableton Live:** `ableton/` has Midular as a Max for Live MIDI effect. See [`ableton/README.md`](ableton/README.md).
 
+![Midular in Ableton Live](ableton/window.png)
+
 ## Install
 
 **With ReaPack** (easiest, and it keeps it up to date): Extensions ->

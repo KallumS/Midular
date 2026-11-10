@@ -1,0 +1,30 @@
+{
+  "name": "Midular",
+  "slug": "Midular",
+  "kind": "midi",
+  "template": "jsfx_midi",
+  "width": 260,
+  "hello": "Show Window opens Midular's own window.",
+  "device": {
+    "main": "Midular.jsfx"
+  },
+  "files": {
+    "Midular.jsfx": "../Midular.jsfx",
+    "midular_core.jsfx-inc": "../midular_core.jsfx-inc",
+    "midular_engine.jsfx-inc": "../midular_engine.jsfx-inc",
+    "midular_ui.jsfx-inc": "../midular_ui.jsfx-inc"
+  },
+  "buttons": [
+    [
+      "Load Clip",
+      "loadClip"
+    ]
+  ],
+  "scripts": [
+    "kit/runtime/jsfx.js",
+    "kit/gfx.js",
+    "kit/live.js",
+    "actions.js",
+    "kit/jsfx_device.js"
+  ]
+}

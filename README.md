@@ -14,6 +14,8 @@ MIDI in ──▶ trigger ──▶ [ mode engine ] ──▶ [ note filter ] �
                         slice   / granular
 ```
 
+**In Ableton Live:** `ableton/` has Midular as a Max for Live MIDI effect. See [`ableton/README.md`](ableton/README.md).
+
 ## Install
 
 **With ReaPack** (easiest, and it keeps it up to date): Extensions ->

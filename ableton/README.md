@@ -2,6 +2,8 @@
 
 A Max for Live MIDI effect. It is `Midular.jsfx` and its three `.jsfx-inc` files, unchanged, running on Middaw's EEL2 runtime, with its own window: a MIDI phrase mapped across the keyboard and shaped like a sample.
 
+**Its colours are Live's**, after Ableton Live 8's default theme: neutral greys and one amber for what is on, so it sits beside Live's own devices. The REAPER version keeps the house scheme's yellow. The window is the script's own, drawn in those colours: its greys turn neutral at the same brightness, so every contrast it was checked for still holds, and its own colours stay.
+
 ## Installing
 
 Needs **Live 12.1 or later with Max for Live** (Live Suite, or Standard with

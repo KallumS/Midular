@@ -6,6 +6,7 @@ const assert = require('node:assert');
 const path = require('node:path');
 const { liveSet } = require('../kit/test/max.js');
 const suite = require('../kit/test/jsfx_suite.js');
+require('../kit/test/palette_suite.js')();
 
 const { device } = suite({ bundle: path.join(__dirname, '..', 'Midular.js'), name: 'Midular', window: [920, 600] });
 
